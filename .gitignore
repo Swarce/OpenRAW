@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+examples/*.dng
+examples/*.png
+!examples/deblock_comparison.png

@@ -1,0 +1,9 @@
+numpy>=1.24
+opencv-contrib-python>=4.8   # needs ximgproc (guidedFilter) -- plain opencv-python won't have it
+pillow>=10.0
+tifffile>=2023.7
+pytest>=7.4   # dev/test only
+
+# For the real InvISP network path (cli.py --invisp), see
+# requirements-invisp.txt instead -- torch is NOT required for the
+# classical deterministic pipeline above.
