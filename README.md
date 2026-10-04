@@ -150,6 +150,14 @@ lives in `pseudoraw/ml/` — see its docstring and `NOTICE.md` for why it's
 kept around (its invertibility tests are still a legitimate from-scratch
 demo) despite not being the path forward anymore.
 
+## Training: `TRAINING.md`
+
+Full workflow (download -> preprocess -> train -> use the result), the
+real bugs found and fixed in upstream's own `train.py`/dataset loader
+(not cosmetic — these blocked it from running at all), and what's been
+verified here (imports, `DiffJPEG`'s forward pass) vs. what still needs
+a real GPU to confirm (an actual training step has never run).
+
 ## Training data: `data/`
 
 The exact Canon EOS 5D + Nikon D700 MIT-Adobe FiveK subset InvISP's own

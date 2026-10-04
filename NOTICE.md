@@ -52,6 +52,22 @@ bug found in `data_preprocess.py` (a camera-name string typo that makes
 Canon's black-level subtraction dead code) that was deliberately left
 unpatched rather than silently "corrected" — see that file for why.
 
+**Also vendored (added for actual training): `train.py`, `dataset/`
+(`FiveK_dataset.py`, `base_dataset.py`), `config/config.py`.** See
+[`TRAINING.md`](TRAINING.md) for the full workflow and three real fixes
+applied to get this running at all (not cosmetic): `train.py`'s import
+paths patched to match this repo's layout (`model`/`utils` live under
+`third_party/invisp/` here, not top-level as in upstream); `train.py`'s
+hard `nvidia-smi` shell-out replaced with an explicit CUDA check plus a
+non-fatal fallback instead of a confusing crash on any machine where
+`nvidia-smi` isn't on PATH in exactly the form upstream assumed; and
+`dataset/FiveK_dataset.py`'s `from scipy.misc import imread` (removed
+from scipy years ago, fails outright on any current scipy) replaced with
+an equivalent PIL-based read. Two genuinely dead imports in
+`FiveK_dataset.py` (`torchvision`, `rawpy` — imported, never referenced)
+were deliberately left untouched rather than "cleaned up", consistent
+with this project's pattern of patching only what's actually broken.
+
 **What was NOT vendored:** `dataset/` (the PyTorch `Dataset` class
 itself — pseudoraw doesn't yet have its own training loop to feed it
 into), `config/`, `train.py`, `test_rgb.py`, `test_raw.py`,
