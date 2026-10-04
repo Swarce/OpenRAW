@@ -43,18 +43,29 @@ untouched — deprecated-with-a-warning but still functional on 2.14.1, so
 no reason to touch what isn't broken yet (`requirements-invisp.txt` still
 flags them as a future risk).
 
-**What was NOT vendored:** `dataset/`, `config/`, `train.py`,
-`test_rgb.py`, `test_raw.py`, `cal_metrics.py` — upstream's
-FiveK-dataset-specific training/eval scripts, which pull in extra
-dependencies (`rawpy`, `torchvision`, a now-removed `scipy.misc.imread`)
-this project doesn't otherwise need. `pseudoraw/invisp_bridge.py` is
-**our own new code**, not vendored, that replaces their role for
-single-image inference — it reuses `pseudoraw/decode.py` instead of
-their dataset loader, and was written by reading their `test_rgb.py`
-and `test_raw.py` in full to match their preprocessing (normalization,
-white-balance handling, the `--gamma` training flag's effect on what the
-"RAW" side of the network actually represents) rather than guessing at
-it. See that file's docstring for specifics.
+**Also vendored (added when sourcing training data, not in the initial
+pull):** `data/*.txt` (the exact Canon EOS 5D / Nikon D700 image lists
+and URLs `canon.pth`/`nikon.pth` were themselves trained+evaluated on),
+`data/data_preprocess.py`, `data/data_preprocess.sh`. See
+[`data/README.md`](data/README.md) for size estimates, usage, and a real
+bug found in `data_preprocess.py` (a camera-name string typo that makes
+Canon's black-level subtraction dead code) that was deliberately left
+unpatched rather than silently "corrected" — see that file for why.
+
+**What was NOT vendored:** `dataset/` (the PyTorch `Dataset` class
+itself — pseudoraw doesn't yet have its own training loop to feed it
+into), `config/`, `train.py`, `test_rgb.py`, `test_raw.py`,
+`cal_metrics.py` — upstream's FiveK-dataset-specific training/eval
+scripts, which pull in extra dependencies (`torchvision`, a now-removed
+`scipy.misc.imread`) beyond what this project otherwise needs.
+`pseudoraw/invisp_bridge.py` is **our own new code**, not vendored, that
+replaces their role for single-image inference — it reuses
+`pseudoraw/decode.py` instead of their dataset loader, and was written
+by reading their `test_rgb.py` and `test_raw.py` in full to match their
+preprocessing (normalization, white-balance handling, the `--gamma`
+training flag's effect on what the "RAW" side of the network actually
+represents) rather than guessing at it. See that file's docstring for
+specifics.
 
 **Pretrained weights:** `pretrained/canon.pth` and `pretrained/nikon.pth`
 are upstream's own official checkpoints (verified byte-identical via

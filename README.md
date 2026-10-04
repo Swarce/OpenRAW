@@ -150,6 +150,15 @@ lives in `pseudoraw/ml/` — see its docstring and `NOTICE.md` for why it's
 kept around (its invertibility tests are still a legitimate from-scratch
 demo) despite not being the path forward anymore.
 
+## Training data: `data/`
+
+The exact Canon EOS 5D + Nikon D700 MIT-Adobe FiveK subset InvISP's own
+checkpoints were trained on — 1,264 images, ~11.7 GB (not the full
+5,000-image / 47.34 GB FiveK set). See [`data/README.md`](data/README.md)
+for download commands, a smaller 200-image/~1.9GB test-split-only option
+to start with, and a real bug found (not fixed) in the vendored
+preprocessing script.
+
 ## What's genuinely demonstrated by this POC
 
 - A real, valid Linear DNG that round-trips through `tifffile` with
