@@ -56,6 +56,19 @@ def main() -> int:
     )
     p.add_argument("--invisp-pretrained-dir", default="pretrained")
     p.add_argument("--invisp-device", default="cpu", help="'cpu' or 'cuda:0' etc.")
+    p.add_argument("--no-compress", action="store_true", help="write fully uncompressed DNG (not recommended, see dng_writer.py)")
+    p.add_argument("--compression-level", type=int, default=9, help="1 (fastest) - 9 (smallest), default 9")
+    p.add_argument("--no-exif", action="store_true", help="don't carry camera metadata (Make/Model/lens/exposure/etc) from the source JPEG into the DNG")
+    p.add_argument(
+        "--preserve-gps",
+        action="store_true",
+        help=(
+            "Currently a no-op (see exif_transfer.py: GPS needs a proper sub-IFD "
+            "writer, not implemented yet) -- reserved for when that's done. "
+            "GPS is off by default even once implemented: it's capture location, "
+            "worth opting into deliberately, not forwarding silently."
+        ),
+    )
     args = p.parse_args()
 
     config = PipelineConfig(
@@ -70,6 +83,10 @@ def main() -> int:
         invisp_camera=args.invisp_camera,
         invisp_pretrained_dir=args.invisp_pretrained_dir,
         invisp_device=args.invisp_device,
+        dng_compress=not args.no_compress,
+        dng_compression_level=args.compression_level,
+        preserve_exif=not args.no_exif,
+        preserve_gps=args.preserve_gps,
     )
 
     pipeline = PseudoRawPipeline(config)
@@ -80,7 +97,18 @@ def main() -> int:
 
     d = result.decoded
     print(f"input:           {args.input}  ({d.width}x{d.height})")
-    print(f"quality estimate: {d.quality_estimate:.1f} / 100  (drives deblock strength)")
+    print(f"luma quality:    {d.quality_estimate:.1f} / 100  (drives deblock strength)")
+    if d.chroma_quality_estimate is not None:
+        subsampled = "4:2:0/4:2:2-ish, subsampled" if d.is_chroma_subsampled else "4:4:4, NOT subsampled"
+        print(f"chroma quality:  {d.chroma_quality_estimate:.1f} / 100  ({subsampled})")
+    if d.exif_fields and (d.exif_fields.get("ifd0") or d.exif_fields.get("exif_sub")):
+        make = d.exif_fields.get("ifd0", {}).get(271, "")
+        model = d.exif_fields.get("ifd0", {}).get(272, "")
+        cam = f"{make} {model}".strip()
+        n_fields = len(d.exif_fields.get("ifd0", {})) + len(d.exif_fields.get("exif_sub", {}))
+        print(f"camera metadata: {n_fields} field(s) found" + (f" ({cam})" if cam else "") + (" -- carried into output" if not args.no_exif else " -- NOT carried (--no-exif)"))
+    else:
+        print("camera metadata: none found in source JPEG")
     print(f"output:          {args.output}")
     print(f"elapsed:         {dt:.2f}s")
     return 0

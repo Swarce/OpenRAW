@@ -40,6 +40,12 @@ class PipelineConfig:
     deband: bool = True
     seed: int | None = 0
 
+    # Output DNG: compression and real camera-metadata passthrough.
+    dng_compress: bool = True
+    dng_compression_level: int = 9
+    preserve_exif: bool = True
+    preserve_gps: bool = False  # off by default -- see exif_transfer.py
+
     # Real InvISP network path (pseudoraw/invisp_bridge.py), as an
     # alternative to the classical deblock/chroma/tonecurve stages above.
     # Requires torch + a matching checkpoint in pretrained/ -- see
@@ -89,7 +95,12 @@ class PseudoRawPipeline:
             if cfg.deblock_enabled:
                 working = deblock(working, decoded.quality_estimate)
             if cfg.chroma_refine_enabled:
-                working = refine_chroma(working, strength=cfg.chroma_refine_strength)
+                working = refine_chroma(
+                    working,
+                    strength=cfg.chroma_refine_strength,
+                    is_chroma_subsampled=decoded.is_chroma_subsampled,
+                    chroma_quality_estimate=decoded.chroma_quality_estimate,
+                )
 
             linear = srgb_to_linear(working)
             if cfg.generic_s_curve_strength > 0:
@@ -108,11 +119,16 @@ class PseudoRawPipeline:
         return PipelineResult(decoded=decoded, linear_rgb=linear, rgb16=rgb16)
 
     def run_to_dng(self, jpeg_path: str, out_path: str) -> PipelineResult:
+        cfg = self.config
         result = self.run(jpeg_path)
         write_linear_dng(
             out_path,
             result.rgb16,
             source_jpeg_path=jpeg_path,
             pipeline_version=_PIPELINE_VERSION,
+            compress=cfg.dng_compress,
+            compression_level=cfg.dng_compression_level,
+            exif_fields=result.decoded.exif_fields if cfg.preserve_exif else None,
+            preserve_gps=cfg.preserve_gps,
         )
         return result

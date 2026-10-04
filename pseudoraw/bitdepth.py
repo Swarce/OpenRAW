@@ -21,6 +21,18 @@ existing error rather than inventing detail:
    only in genuinely flat, low-gradient regions (skies, skin, shadows),
    masked off everywhere there's real detail, so we're not just
    blurring the whole image to hide banding.
+
+Both mitigations now share one flatness mask (previously deband computed
+its own and dithering ignored it entirely). The reasoning applies to
+dithering just as much as debanding: dither noise only needs to be at
+full strength where banding would actually be visible -- genuinely flat
+regions. In already-detailed/textured regions, real texture already
+masks quantization steps, so full-strength dither there was adding noise
+for no visible benefit while actively hurting lossless compressibility
+(uniform random noise is close to incompressible; see dng_writer.py's
+compress=True). Textured regions still get a reduced floor (25%) of
+dither rather than none, as a margin against the flatness heuristic
+missing a soft gradient it should have caught.
 """
 
 from __future__ import annotations
@@ -69,21 +81,28 @@ def expand_to_16bit(
     out = linear_rgb.copy()
     rng = np.random.default_rng(seed)
 
-    if dither:
-        amp = _dither_amplitude(source_srgb_u8)  # HxWx3, local linear step size
-        # Triangular dither: sum of two uniforms, centered at 0, spread
-        # +/-1 step — standard shape for breaking quantization banding
-        # without adding a DC bias.
-        noise = (rng.random(out.shape, dtype=np.float32) - rng.random(out.shape, dtype=np.float32))
-        out = out + noise * amp
-
-    if deband:
+    flat_mask = None
+    if dither or deband:
         gray = cv2.cvtColor((np.clip(linear_rgb, 0, 1) * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
         grad = cv2.Laplacian(gray, cv2.CV_32F, ksize=3)
         grad_mag = np.abs(grad)
         flat_mask = np.clip(1.0 - grad_mag / 12.0, 0.0, 1.0)  # 1 = flat, 0 = edge/detail
         flat_mask = cv2.GaussianBlur(flat_mask, (9, 9), 0)[..., None]
 
+    if dither:
+        amp = _dither_amplitude(source_srgb_u8)  # HxWx3, local linear step size
+        # Scale dither amplitude by local flatness: full strength where
+        # banding would actually show, a 25% floor elsewhere rather than
+        # zero (margin against the flatness heuristic missing a region
+        # it should have caught) -- see module docstring.
+        dither_scale = 0.25 + 0.75 * flat_mask
+        # Triangular dither: sum of two uniforms, centered at 0, spread
+        # +/-1 step — standard shape for breaking quantization banding
+        # without adding a DC bias.
+        noise = (rng.random(out.shape, dtype=np.float32) - rng.random(out.shape, dtype=np.float32))
+        out = out + noise * amp * dither_scale
+
+    if deband:
         smoothed = np.empty_like(out)
         for c in range(3):
             smoothed[..., c] = cv2.bilateralFilter(
