@@ -139,6 +139,25 @@ def write_linear_dng(
         software=f"pseudoraw {pipeline_version}",
         extratags=extratags,
         metadata=None,  # don't let tifffile add its own JSON/OME shape metadata
+        # Explicit, deliberately not left to tifffile's inference: DNG's
+        # LinearRaw (34892) isn't in tifffile's own recognized PHOTOMETRIC
+        # enum, so tifffile has to guess how many of our 3 samples its
+        # photometric value "already accounts for" versus how many are
+        # "extra". Different tifffile versions guess differently for an
+        # unrecognized photometric -- confirmed by a real bug report: a
+        # user's tifffile install guessed 1, writing a spurious
+        # ExtraSamples(UNSPECIFIED, UNSPECIFIED) tag claiming our 2 real
+        # color channels were "extra" samples needing interpretation,
+        # which a strict DNG reader could reasonably choke on even
+        # though lenient ones (including tifffile's own reader) tolerate
+        # it fine. This sandbox's tifffile version happened to guess
+        # correctly (3) by default, which is exactly why this didn't
+        # reproduce here until explicitly tested against the reported
+        # file -- a version-dependent default was never something to
+        # rely on. extrasamples=() makes the real answer (zero extra
+        # samples; all 3 are the photometric's own color channels)
+        # explicit and version-independent.
+        extrasamples=(),
     )
     if compress:
         # Deflate = DNG Compression tag value 8, a standard lossless DNG

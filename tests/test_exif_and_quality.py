@@ -126,6 +126,38 @@ def test_dng_write_carries_real_make_model_overriding_placeholder(tmp_path):
         assert fnum_num / fnum_den == pytest.approx(2.8, abs=0.01)
 
 
+def test_dng_write_has_no_extrasamples_tag(tmp_path):
+    """
+    Regression test for a real bug a user hit: an ExtraSamples tag
+    claiming 2 of our 3 real color channels were "extra" (unspecified)
+    samples, which a strict DNG reader could reject even though lenient
+    readers (tifffile's own included) tolerate it. Root cause: DNG's
+    PhotometricInterpretation value (34892, LinearRaw) isn't in
+    tifffile's own recognized enum, so different tifffile versions
+    guess differently how many of our samples it "explains" versus
+    leaves as extra. Pin it explicit and version-independent.
+
+    Tested at the user's actual reported dimensions (4896x3672) as well
+    as a small size, since the bug didn't reproduce at small sizes in
+    the environment this was originally debugged in -- which turned out
+    to be irrelevant (it was a tifffile-version issue, not a size
+    issue), but there's no reason not to cover both now that it's cheap.
+    """
+    for h, w in [(16, 16), (3672, 4896)]:
+        rgb16 = (np.random.default_rng(0).random((h, w, 3)) * 65535).astype(np.uint16)
+        out = str(tmp_path / f"out_{h}x{w}.dng")
+        write_linear_dng(out, rgb16)
+
+        with tifffile.TiffFile(out) as tf:
+            page = tf.pages[0]
+            assert 338 not in page.tags, f"spurious ExtraSamples tag at {h}x{w}"
+            assert page.tags[277].value == 3  # SamplesPerPixel
+            assert page.photometric == 34892
+
+        arr = tifffile.imread(out)
+        assert np.array_equal(arr, rgb16)
+
+
 def test_dng_write_without_exif_fields_keeps_placeholder(tmp_path):
     rgb16 = (np.random.default_rng(0).random((16, 16, 3)) * 65535).astype(np.uint16)
     out = str(tmp_path / "out.dng")
