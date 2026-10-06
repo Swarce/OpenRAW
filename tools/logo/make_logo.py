@@ -8,7 +8,7 @@ Aperture construction: N lines, each extending one side of a regular
 N-gon (the lens opening) outward to the rim. Those lines, drawn as gaps,
 split the disk into N pinwheel blades.
 
-Lettering: Archivo (SIL Open Font License, see fonts/OFL.txt), shaped
+Lettering: IBM Plex Sans (SIL Open Font License, see fonts/OFL-IBMPlexSans.txt), shaped
 with HarfBuzz for real kerning and converted to outlines, so the SVGs
 render identically without the font installed.
 
@@ -39,7 +39,6 @@ from shapely.ops import unary_union
 from shapely import affinity
 
 HERE = Path(__file__).resolve().parent
-FONT = HERE / "fonts" / "Archivo[wdth,wght].ttf"
 
 # ---- geometry (aperture units: rim radius = 100) ----
 BLADES = 6
@@ -57,13 +56,26 @@ BAYER = {"R": "#E5484D", "G": "#2FA36B", "B": "#3E63DD"}
 # ---------------------------------------------------------------- text
 _font_cache: dict = {}
 
+# Wordmark typeface. Any variable TTF works; every axis except weight is
+# pinned (optical size, if present, to its display end).
+FONT = HERE / "fonts" / "IBMPlexSans[wdth,wght].ttf"
 
-def _instance(wght: float, wdth: float = 100.0):
-    key = (wght, wdth)
+
+def _instance(wght: float, font: Path | None = None):
+    font = Path(font or FONT)
+    key = (str(font), wght)
     if key not in _font_cache:
-        vf = TTFont(FONT)
-        inst = instantiateVariableFont(vf, {"wght": wght, "wdth": wdth})
-        path = HERE / f".inst_{int(wght)}_{int(wdth)}.ttf"
+        vf = TTFont(font)
+        loc = {}
+        for ax in vf["fvar"].axes:
+            if ax.axisTag == "wght":
+                loc["wght"] = max(ax.minValue, min(ax.maxValue, wght))  # clamp to the font's range
+            elif ax.axisTag == "opsz":
+                loc["opsz"] = ax.maxValue
+            else:
+                loc[ax.axisTag] = ax.defaultValue
+        inst = instantiateVariableFont(vf, loc)
+        path = HERE / f".inst_{font.stem}_{int(wght)}.ttf"
         inst.save(path)
         _font_cache[key] = (TTFont(path), hb.Font(hb.Face(hb.Blob(path.read_bytes()))), path)
     return _font_cache[key]
@@ -104,12 +116,12 @@ class _FlatPen(BasePen):
     _endPath = _closePath
 
 
-def text_geometry(runs, size: float, x: float, y: float):
+def text_geometry(runs, size: float, x: float, y: float, font=None):
     """runs: [(text, weight), ...] on one baseline at y, starting at x.
     Returns ([shapely geometry per run], total advance width)."""
     geoms, pen_x = [], x
     for text, wght in runs:
-        tt, hbfont, _ = _instance(wght)
+        tt, hbfont, _ = _instance(wght, font)
         s = size / tt["head"].unitsPerEm
         buf = hb.Buffer(); buf.add_str(text); buf.guess_segment_properties()
         hb.shape(hbfont, buf, {"kern": True, "liga": True})
@@ -187,14 +199,14 @@ def svg(layers, pad=6.0, title="OpenRAW"):
 
 
 # ---------------------------------------------------------- compositions
-def lockup_layers(ink, core, runs, size=34.0, halo=6.0, baseline=62.0):
+def lockup_layers(ink, core, runs, size=36.0, halo=5.4, baseline=63.0, font=None):
     """Aperture with the wordmark across its lower-right rim, about half the
     word outside the circle; the aperture is knocked out around the letters
     (a halo) so the word reads cleanly over the blades."""
-    _, w = text_geometry(runs, size, 0, 0)
+    _, w = text_geometry(runs, size, 0, 0, font)
     mid = baseline - size * 0.35                      # optical middle of the caps
     rim_x = math.sqrt(max(RING_OUTER ** 2 - mid ** 2, 0))
-    words, _ = text_geometry(runs, size, rim_x - w / 2, baseline)
+    words, _ = text_geometry(runs, size, rim_x - w / 2, baseline, font)
     halo_shape = unary_union(words).buffer(halo, join_style="round")
     ap = aperture_geometry(core)
     layers = [(ap["ink"].difference(halo_shape), ink)]
@@ -209,26 +221,24 @@ def mark_layers(ink, core):
 
 
 # ------------------------------------------------------------------ main
-CONCEPTS = {
-    # A: the brief -- shutter with the wordmark across its lower right
-    "a-classic": dict(core="plain", runs=[("OpenRAW", 800)]),
-    # B: a Bayer RGGB sensor tile shows through the opening (raw = sensor
-    #    data); "Open" light / "RAW" heavy
-    "b-bayer": dict(core="bayer", runs=[("Open", 380), ("RAW", 850)]),
-}
+# The OpenRAW logo: aperture with a Bayer RGGB sensor tile in the opening,
+# wordmark "Open" regular / "RAW" bold across the lower-right rim.
+WORDMARK = [("Open", 400), ("RAW", 700)]
 
 
 def build(out: Path):
     out.mkdir(parents=True, exist_ok=True)
     files = []
     for theme, ink in (("light", INK_LIGHT_BG), ("dark", INK_DARK_BG)):
-        for name, c in CONCEPTS.items():
-            p = out / f"openraw-{name}-{theme}.svg"
-            p.write_text(svg(lockup_layers(ink, c["core"], c["runs"])))
-            files.append(p)
-        for core in ("plain", "bayer"):
-            p = out / f"openraw-mark-{core}-{theme}.svg"
-            p.write_text(svg(mark_layers(ink, core), pad=4, title="OpenRAW"))
+        outputs = {
+            f"openraw-logo-{theme}.svg": (svg(lockup_layers(ink, "bayer", WORDMARK)), ),
+            f"openraw-mark-{theme}.svg": (svg(mark_layers(ink, "bayer"), pad=4), ),
+            # single-colour mark: for contexts where colour isn't available
+            f"openraw-mark-mono-{theme}.svg": (svg(mark_layers(ink, "plain"), pad=4), ),
+        }
+        for name, (content,) in outputs.items():
+            p = out / name
+            p.write_text(content)
             files.append(p)
     for f in HERE.glob(".inst_*.ttf"):
         f.unlink()

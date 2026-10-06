@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/openraw-a-classic-dark.svg">
-    <img src="assets/logo/openraw-a-classic-light.svg" alt="OpenRAW" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/openraw-logo-dark.svg">
+    <img src="assets/logo/openraw-logo-light.svg" alt="OpenRAW" width="400">
   </picture>
 </p>
 
