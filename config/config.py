@@ -23,6 +23,8 @@ def get_arguments():
                         help="list FiveK cameras with image counts and exit")
     parser.add_argument("--all-downloaded", dest="all_downloaded", action="store_true",
                         help="train on every camera found in data/fivek/raw/, using whatever is downloaded")
+    parser.add_argument("--delete-dngs", dest="delete_dngs", action="store_true",
+                        help="delete each DNG once preprocessed into a training pair (saves disk)")
     parser.add_argument("--download", action="store_true",
                         help="download any missing DNGs for the chosen camera(s) before training")
     parser.add_argument("--prepare-only", dest="prepare_only", action="store_true",

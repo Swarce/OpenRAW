@@ -25,6 +25,10 @@ train/test lists, then trains. Re-running skips everything already done.
   ```bash
   python train.py --task all_cameras --all-downloaded --gamma --aug
   ```
+- **Save disk**: add `--delete-dngs` to delete each DNG once its training
+  pair is written. Downloads and preprocessing then run in small batches, so
+  peak usage stays at a few hundred MB rather than a whole camera's DNGs.
+  Cameras stay detectable by `--all-downloaded` after their DNGs are gone.
 - **Several specific cameras**: repeat `--camera` (or use commas) to pool them into
   one model — e.g. `--camera "Nikon D700" --camera "Canon EOS 5D"`. A
   multi-camera model is arguably the more useful one for OpenRAW, since a
@@ -45,7 +49,7 @@ optionally expert TIFFs) and `data/fivek_prepare.py --camera ... --download`.
 data/fivek/raw/<Make_Model>/<name>.dng   downloaded originals, e.g. data/fivek/raw/Canon_EOS_10D/
                                          (fivek_download.py's layout with --out data/fivek;
                                          deletable after preprocessing)
-data/<CameraDir>/RAW/<name>.npz       demosaiced linear raw + white balance + levels
+data/<CameraDir>/RAW/<name>.npz       sensor mosaic (compact, lossless) + white balance + levels
 data/<CameraDir>/RGB/<name>.jpg       rendered training target
 data/<CameraDir>_train.txt, _test.txt
 data/fivek/_metadata/*.json           FiveK camera/split metadata (cached)
@@ -88,6 +92,20 @@ those files with upstream's original normalization.
 `data/fivek_download.py --experts`, but aren't used as training targets:
 they're artistic retouches in ProPhoto RGB, while OpenRAW's input is camera
 JPEGs, so a model trained to invert them would learn the wrong mapping.
+
+## Storage format
+
+Training pairs store the **sensor mosaic** (one value per pixel, black-level
+subtracted, rotated upright) as four lossless-JPEG colour planes, and are
+demosaiced at load time — only the 256 px crop each training step uses, so
+it's cheap and gives exactly what a full-frame demosaic would. For an 18 MP
+photo that's **~18 MB instead of ~216 MB** for upstream's demosaiced float32
+arrays (format details: `dataset/mosaic_store.py`).
+
+Pairs in the previous, larger format are shrunk in place automatically the
+next time their camera is prepared — no re-download. That conversion is
+bit-exact except within 2 px of the image edge, where the old format had
+clipped values that can't be recovered.
 
 ## Training options
 

@@ -9,6 +9,7 @@ from glob import glob
 from PIL import Image as PILImage
 import numbers
 from .base_dataset import BaseDataset
+from . import mosaic_store
 
 
 # PATCHED (OpenRAW, not upstream): the original here was
@@ -88,13 +89,33 @@ class FiveKDatasetTrain(BaseDataset):
         
         target_rgb_img = imread(target_rgb_path)
         input_raw_wb = np.load(input_raw_wb_path)
-        input_raw_img = input_raw_wb['raw']
         wb = input_raw_wb['wb']
         wb = wb / wb.max() 
-        input_raw_img = input_raw_img * wb[:-1]   
-
         self.patch_size = 256
-        input_raw_img, target_rgb_img = self.aug(self.patch_size, input_raw_img, target_rgb_img, flow=True, demos=True)  
+
+        if mosaic_store.is_mosaic(input_raw_wb):
+            # PATCHED (OpenRAW, not upstream): compact mosaic storage (see
+            # dataset/mosaic_store.py). Pick the crop first, then demosaic only
+            # that region -- ~1% of a full-frame demosaic for a 256px patch.
+            # Crop origin is even so the CFA phase is preserved; result is
+            # identical to demosaicing the full frame and cropping.
+            mosaic, pattern = mosaic_store.unpack(input_raw_wb)
+            H = min(mosaic.shape[0], target_rgb_img.shape[0])
+            W = min(mosaic.shape[1], target_rgb_img.shape[1])
+            ps = self.patch_size
+            y = random.randint(0, max(0, H - ps)) // 2 * 2
+            x = random.randint(0, max(0, W - ps)) // 2 * 2
+            h, w = min(ps, H - y), min(ps, W - x)
+            input_raw_img = mosaic_store.demosaic_region(mosaic, pattern, y, x, h, w)
+            np.clip(input_raw_img, 0, float(input_raw_wb['white_level']), out=input_raw_img)
+            target_rgb_img = target_rgb_img[y:y + h, x:x + w]
+            input_raw_img = input_raw_img * wb[:-1]
+            input_raw_img, target_rgb_img = self.random_rotate(input_raw_img, target_rgb_img)
+            input_raw_img, target_rgb_img = self.random_flip(input_raw_img, target_rgb_img)
+        else:
+            input_raw_img = input_raw_wb['raw']
+            input_raw_img = input_raw_img * wb[:-1]   
+            input_raw_img, target_rgb_img = self.aug(self.patch_size, input_raw_img, target_rgb_img, flow=True, demos=True)  
 
         norm_value = _norm_value(input_raw_wb, input_raw_wb_path, self.gamma)  # PATCHED, see _norm_value
         if self.gamma:
@@ -130,7 +151,12 @@ class FiveKDatasetTest(BaseDataset):
         
         target_rgb_img = imread(target_rgb_path)
         input_raw_wb = np.load(input_raw_wb_path)
-        input_raw_img = input_raw_wb['raw']
+        if mosaic_store.is_mosaic(input_raw_wb):  # PATCHED (OpenRAW): compact storage, full-frame demosaic
+            mosaic, pattern = mosaic_store.unpack(input_raw_wb)
+            input_raw_img = mosaic_store.demosaic(mosaic, pattern)
+            np.clip(input_raw_img, 0, float(input_raw_wb['white_level']), out=input_raw_img)
+        else:
+            input_raw_img = input_raw_wb['raw']
         wb = input_raw_wb['wb']
         wb = wb / wb.max() 
         input_raw_img = input_raw_img * wb[:-1]   

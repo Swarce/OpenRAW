@@ -53,7 +53,8 @@ if __name__ == "__main__":
         print(f"[data] found {len(_found)} downloaded camera(s): " + ", ".join(_found))
         _queries += [c for c in _found if c not in _queries]
     args.camera = _fp.prepare_cameras(_queries or ["NIKON_D700"], args.data_path, download=args.download,
-                                      jobs=args.download_jobs, use_available=args.all_downloaded)
+                                      jobs=args.download_jobs, use_available=args.all_downloaded,
+                                      delete_dngs=args.delete_dngs)
     if args.prepare_only:
         print("[data] prepared:", ", ".join(args.camera))
         raise SystemExit(0)
