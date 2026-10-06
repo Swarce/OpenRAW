@@ -12,6 +12,11 @@ summarized; commit messages carry the full detail and measurements.
   `OpenRAW` (Make/Software) and `OpenRAW virtual sensor` (UniqueCameraModel).
 
 ### Added
+- Training: parallel data loading (`--workers`, default up to 8; upstream
+  loaded on the main thread, leaving the GPU mostly idle), exact resume from
+  full-state checkpoints (`latest_state.pth`: optimizer, LR schedule,
+  epoch/step) with atomic saves, `--start_epoch` for weights-only
+  checkpoints, data/compute timing and per-epoch ETA, `--epochs`, `--device`.
 - **FiveK training by camera**: `train.py --camera "Nikon D70" --download`
   fetches only that camera's DNGs, preprocesses them, and writes the split
   lists; `--list-cameras`, `--prepare-only`, multi-camera pooling. Built on
@@ -44,6 +49,9 @@ summarized; commit messages carry the full detail and measurements.
   upstream code and official checkpoints; training scaffolding for FiveK.
 
 ### Fixed
+- Training: upstream's GPU auto-select shelled out to `grep`/`rm` (absent on
+  Windows, so it failed every run) and set `CUDA_VISIBLE_DEVICES` after CUDA
+  was already touched; now queries `nvidia-smi` directly and selects by index.
 - `train.py` reported "no GPU" when the real cause was a CPU-only PyTorch
   build (PyPI's default on Windows/macOS); it now says which of CPU build /
   missing driver / old driver it is, with the fix. Install docs updated.

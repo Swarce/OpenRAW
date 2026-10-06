@@ -120,10 +120,31 @@ clipped values that can't be recovered.
 ## Training options
 
 `--gamma` matches how the shipped checkpoints were trained; `--aug` enables
-random crop/flip/rotate; also `--resume`, `--batch_size`, `--lr`, `--loss`.
-Checkpoints go to `./exps/<task>/checkpoint/` (`latest.pth` every epoch,
-`NNNN.pth` every 10). Copy one to `pretrained/` to use it with
-`openraw --invisp`.
+random crop/flip/rotate; also `--batch_size`, `--lr`, `--loss`, `--epochs`
+(default 300).
+
+**Speed.** Images are loaded by parallel worker processes (`--workers`,
+default: up to 8, one less than your CPU cores). Preparing one 18 MP sample
+takes ~0.3-0.5 s of CPU, far longer than the GPU step, so with upstream's
+single loader the GPU mostly waited. Each step logs `data` (time spent
+waiting for the loader) and `compute` separately -- if `data` stays well
+above zero, raise `--workers`. Each epoch logs its time and an ETA.
+
+**Resuming.** Every epoch saves `latest.pth` (weights only, usable with
+`openraw --invisp`) and `latest_state.pth` (weights + optimizer +
+learning-rate schedule + epoch/step). `--resume` continues exactly where it
+stopped. Checkpoints are written atomically, so a crash mid-save can't
+corrupt them. `NNNN.pth` snapshots are kept every 10 epochs.
+
+Runs started before `latest_state.pth` existed only have weights: resume
+them with `--resume --start_epoch N`, where N is one more than the last
+`Epoch:` number in the log. The epoch count and learning-rate schedule
+continue from there; only the optimizer's momentum restarts, which settles
+within a few hundred steps.
+
+**Memory.** The full 8-block network needs roughly 4 GB for one training
+step at the default 256 px patch -- fine on a GPU, but `--device cpu`
+(meant for testing) needs that much RAM too.
 
 ## Real fixes applied to get here (not cosmetic — these were blockers)
 

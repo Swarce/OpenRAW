@@ -32,6 +32,15 @@ if __name__ == "__main__":
     parser.add_argument("--loss", type=str, default="L1", choices=["L1", "L2"], help="Choose which loss function to use. ")
     parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate")
     parser.add_argument("--aug", dest='aug', action='store_true', help="Use data augmentation.")
+    # PATCHED (OpenRAW, not upstream): parallel loading, proper resume, device.
+    parser.add_argument("--workers", type=int, default=max(1, min(8, (os.cpu_count() or 2) - 1)),
+                        help="data-loading worker processes (default: up to 8). Loading an 18 MP pair takes "
+                             "~0.3-0.5 s of CPU; with 0 workers the GPU mostly waits on it.")
+    parser.add_argument("--epochs", type=int, default=300, help="total epochs (upstream: 300)")
+    parser.add_argument("--start_epoch", type=int, default=None,
+                        help="with --resume on a weights-only checkpoint (made before full-state "
+                             "checkpoints existed): the epoch to continue from")
+    parser.add_argument("--device", default="cuda", help="'cuda' (default), 'cuda:1', ... or 'cpu' (slow; for testing)")
     args = parser.parse_args()
     print("Parsed arguments: {}".format(args))
 
@@ -70,7 +79,7 @@ if __name__ == "__main__":
     # form, or where CUDA isn't available at all. Same behavior when it
     # works, a clear error instead of a cryptic one when it can't -- see
     # docs/training.md for what this means on your actual machine.
-    if not torch.cuda.is_available():
+    if args.device.startswith("cuda") and not torch.cuda.is_available():
         # Diagnose WHY, instead of just "no GPU" -- the usual cause on Windows
         # and macOS is a CPU-only PyTorch build, which `pip install torch` from
         # PyPI installs there by default, even on machines with an NVIDIA card.
@@ -94,18 +103,24 @@ if __name__ == "__main__":
                     f"PyTorch build for an older CUDA (see https://pytorch.org/get-started/locally/).")
         raise RuntimeError("No usable CUDA GPU (torch.cuda.is_available() is False).\n" + _why +
                            "\nSee docs/training.md.")
-    try:
-        os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
-        free_mem = [int(x.split()[2]) for x in open('tmp', 'r').readlines()]
-        if free_mem:
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(np.argmax(free_mem))
-        os.system('rm -f tmp')
-    except Exception as e:
-        print(f"[WARN] GPU auto-select via nvidia-smi failed ({e}); "
-              f"using default CUDA device / whatever CUDA_VISIBLE_DEVICES "
-              f"is already set to.")
+    # PATCHED (OpenRAW, not upstream): upstream picked the GPU with the most free
+    # memory via `nvidia-smi | grep` + `rm`, setting CUDA_VISIBLE_DEVICES. That
+    # fails on Windows (no grep/rm) and can be ignored once CUDA is initialized.
+    # Now: ask nvidia-smi for free memory directly (any OS) and select the GPU
+    # by device index. Only when --device is plain "cuda" and there are 2+ GPUs.
+    if args.device == "cuda" and torch.cuda.device_count() > 1:
+        try:
+            import subprocess
+            out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                                 capture_output=True, text=True, timeout=20).stdout
+            free_mem = [int(x) for x in out.split()]
+            if len(free_mem) == torch.cuda.device_count():
+                args.device = "cuda:%d" % int(np.argmax(free_mem))
+                print(f"[INFO] using {args.device} (most free memory)")
+        except Exception as e:
+            print(f"[WARN] GPU auto-select failed ({e}); using cuda:0")
 
-    DiffJPEG = DiffJPEG(differentiable=True, quality=90).cuda()
+    DiffJPEG = DiffJPEG(differentiable=True, quality=90).to(args.device)
 
     os.makedirs(args.out_path, exist_ok=True)
     os.makedirs(args.out_path+"%s"%args.task, exist_ok=True)
@@ -115,60 +130,112 @@ if __name__ == "__main__":
         json.dump(args.__dict__, f, indent=2)
 
 
-def main(args):
-    # ======================================define the model======================================
-    net = InvISPNet(channel_in=3, channel_out=3, block_num=8)
-    net.cuda()
-    # load the pretrained weight if there exists one
-    if args.resume:
-        net.load_state_dict(torch.load(args.out_path+"%s/checkpoint/latest.pth"%args.task))
-        print("[INFO] loaded " + args.out_path+"%s/checkpoint/latest.pth"%args.task)
+def _save(obj, path):
+    """Write-then-rename: an interrupted save never leaves a corrupt checkpoint."""
+    tmp = path + ".tmp"
+    torch.save(obj, tmp)
+    os.replace(tmp, path)
 
+
+def _load(path, device):
+    try:
+        return torch.load(path, map_location=device, weights_only=False)  # our own files
+    except TypeError:  # torch < 1.13 has no weights_only
+        return torch.load(path, map_location=device)
+
+
+def main(args):
+    # PATCHED (OpenRAW, not upstream) throughout: device-agnostic, parallel
+    # data loading, full-state checkpoints + exact resume, honest timing.
+    device = torch.device(args.device)
+    ckpt = args.out_path + "%s/checkpoint/" % args.task
+    os.makedirs(ckpt, exist_ok=True)
+    # ======================================define the model======================================
+    net = InvISPNet(channel_in=3, channel_out=3, block_num=8).to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 80], gamma=0.5)    
-    
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 80], gamma=0.5)
+    start_epoch, step = 0, 0
+
+    if args.resume:
+        if os.path.exists(ckpt + "latest_state.pth"):
+            st = _load(ckpt + "latest_state.pth", device)
+            net.load_state_dict(st["net"])
+            optimizer.load_state_dict(st["optimizer"])
+            scheduler.load_state_dict(st["scheduler"])
+            start_epoch, step = st["epoch"] + 1, st["step"]
+            print(f"[INFO] resumed from {ckpt}latest_state.pth: continuing at epoch {start_epoch}, step {step}")
+        elif os.path.exists(ckpt + "latest.pth"):
+            # weights-only checkpoint (upstream format / runs started before full-state saves)
+            net.load_state_dict(_load(ckpt + "latest.pth", device))
+            start_epoch = args.start_epoch or 0
+            for _ in range(start_epoch):  # fast-forward the LR schedule to where training was
+                scheduler.step()
+            print(f"[INFO] loaded weights from {ckpt}latest.pth (no optimizer/epoch state saved in it): "
+                  f"continuing at epoch {start_epoch}" + ("" if args.start_epoch else
+                  " -- pass --start_epoch N to continue the epoch count and LR schedule") +
+                  "; optimizer momentum restarts")
+        else:
+            raise SystemExit(f"--resume: no checkpoint in {ckpt}")
+
     print("[INFO] Start data loading and preprocessing")
-    RAWDataset = FiveKDatasetTrain(opt=args)        
-    dataloader = DataLoader(RAWDataset, batch_size=args.batch_size, shuffle=True, num_workers=0, drop_last=True)
+    RAWDataset = FiveKDatasetTrain(opt=args)
+    dataloader = DataLoader(RAWDataset, batch_size=args.batch_size, shuffle=True, drop_last=True,
+                            num_workers=args.workers, persistent_workers=args.workers > 0,
+                            pin_memory=device.type == "cuda")
+    # (no worker_init_fn needed: since PyTorch 1.9 each worker gets its own NumPy
+    # seed, so augmentations differ across workers -- verified; we require >=1.10)
+    if args.resume and step == 0 and start_epoch:  # weights-only resume: estimate the step count
+        step = start_epoch * len(dataloader)
+    print(f"[INFO] {len(RAWDataset)} training images, {len(dataloader)} steps/epoch, "
+          f"epochs {start_epoch}..{args.epochs - 1}, {args.workers} loader worker(s), device {device}")
 
     print("[INFO] Start to train")
-    step = 0
-    for epoch in range(0, 300):
-        epoch_time = time.time()             
-        
+    run_start, epochs_done = time.time(), 0
+    for epoch in range(start_epoch, args.epochs):
+        epoch_time = time.time()
+        data_t0 = time.time()
         for i_batch, sample_batched in enumerate(dataloader):
-            step_time = time.time() 
+            data_time = time.time() - data_t0  # waiting for the loader -- upstream didn't count this
+            step_time = time.time()
 
-            input, target_rgb, target_raw = sample_batched['input_raw'].cuda(), sample_batched['target_rgb'].cuda(), \
-                                        sample_batched['target_raw'].cuda()
-            
-            reconstruct_rgb = net(input) 
+            input, target_rgb, target_raw = (sample_batched['input_raw'].to(device, non_blocking=True),
+                                             sample_batched['target_rgb'].to(device, non_blocking=True),
+                                             sample_batched['target_raw'].to(device, non_blocking=True))
+
+            reconstruct_rgb = net(input)
             reconstruct_rgb = torch.clamp(reconstruct_rgb, 0, 1)
             rgb_loss = F.l1_loss(reconstruct_rgb, target_rgb)
             reconstruct_rgb = DiffJPEG(reconstruct_rgb)
             reconstruct_raw = net(reconstruct_rgb, rev=True)
             raw_loss = F.l1_loss(reconstruct_raw, target_raw)
-            
+
             loss = args.rgb_weight * rgb_loss + raw_loss
-            
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
-            print("task: %s Epoch: %d Step: %d || loss: %.5f raw_loss: %.5f rgb_loss: %.5f || lr: %f time: %f"%(
-                args.task, epoch, step, loss.detach().cpu().numpy(), raw_loss.detach().cpu().numpy(), 
-                rgb_loss.detach().cpu().numpy(), optimizer.param_groups[0]['lr'], time.time()-step_time
-            )) 
-            step += 1 
-        
-        torch.save(net.state_dict(), args.out_path+"%s/checkpoint/latest.pth"%args.task)
-        if (epoch+1) % 10 == 0:
-            # os.makedirs(args.out_path+"%s/checkpoint/%04d"%(args.task,epoch), exist_ok=True)
-            torch.save(net.state_dict(), args.out_path+"%s/checkpoint/%04d.pth"%(args.task,epoch))
-            print("[INFO] Successfully saved "+args.out_path+"%s/checkpoint/%04d.pth"%(args.task,epoch))
-        scheduler.step()   
-        
-        print("[INFO] Epoch time: ", time.time()-epoch_time, "task: ", args.task)    
+
+            print("task: %s Epoch: %d Step: %d || loss: %.5f raw_loss: %.5f rgb_loss: %.5f || lr: %f || data %.3fs compute %.3fs" % (
+                args.task, epoch, step, loss.detach().cpu().numpy(), raw_loss.detach().cpu().numpy(),
+                rgb_loss.detach().cpu().numpy(), optimizer.param_groups[0]['lr'], data_time, time.time() - step_time))
+            step += 1
+            data_t0 = time.time()
+
+        scheduler.step()
+        # weights-only latest.pth stays compatible with `openraw --invisp`;
+        # latest_state.pth carries everything --resume needs
+        _save(net.state_dict(), ckpt + "latest.pth")
+        _save({"net": net.state_dict(), "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
+               "epoch": epoch, "step": step}, ckpt + "latest_state.pth")
+        if (epoch + 1) % 10 == 0:
+            _save(net.state_dict(), ckpt + "%04d.pth" % epoch)
+            print("[INFO] Successfully saved " + ckpt + "%04d.pth" % epoch)
+
+        epochs_done += 1
+        took = time.time() - epoch_time
+        left = (time.time() - run_start) / epochs_done * (args.epochs - epoch - 1)
+        print("[INFO] Epoch %d time: %.1fs | ETA for remaining %d epoch(s): %.1f h | task: %s" % (
+            epoch, took, args.epochs - epoch - 1, left / 3600, args.task))
 
 if __name__ == '__main__':
 
