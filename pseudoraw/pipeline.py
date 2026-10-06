@@ -26,7 +26,7 @@ from .colormatrix import apply_experimental_gamut_widen
 from .bitdepth import expand_to_16bit
 from .dng_writer import write_linear_dng
 
-_PIPELINE_VERSION = "0.0.1-poc"
+from ._version import __version__ as _PIPELINE_VERSION
 
 
 @dataclass

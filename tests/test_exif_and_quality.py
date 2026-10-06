@@ -444,3 +444,28 @@ def test_dng_passes_adobe_dng_validate(tmp_path, write_preview, compression, bit
     text = r.stdout + r.stderr
     assert "*** Error" not in text and "*** Warning" not in text, text
     assert "Validation complete" in text
+
+
+@pytest.mark.parametrize("write_preview", [True, False])
+@pytest.mark.parametrize("compression,bit_depth", [("none", 16), ("ljpeg", 16), ("ljpeg", 12)])
+def test_main_ifd_has_exactly_the_tags_we_intend(tmp_path, write_preview, compression, bit_depth):
+    """
+    The main image is written as plain RGB and patched to LinearRaw afterwards,
+    because tifffile has to guess what an unknown photometric (34892) means and
+    different versions guess differently (one wrote spurious ExtraSamples --
+    a real user bug; 2026.9.20 raised StopIteration). Pin the end result:
+    LinearRaw, no ExtraSamples, and none of the YCbCr tags tifffile adds to
+    any JPEG-compressed RGB IFD. Holds for every tifffile version.
+    """
+    rgb16 = (np.random.default_rng(0).random((300, 300, 3)) * 65535).astype(np.uint16)
+    out = str(tmp_path / "out.dng")
+    write_linear_dng(out, rgb16, write_preview=write_preview, compression=compression, bit_depth=bit_depth)
+    with tifffile.TiffFile(out) as tf:
+        page = main_page(tf)
+        codes = {t.code for t in page.tags}
+        assert page.photometric == 34892
+        assert not codes & {338, 530, 532}
+        assert page.tags[277].value == 3
+    from .helpers import decoded_linear
+    if bit_depth == 16:
+        assert np.array_equal(decoded_linear(out), rgb16)

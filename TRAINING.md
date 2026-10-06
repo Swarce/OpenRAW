@@ -82,7 +82,7 @@ necessary to run, document inline, never silently.
   ever used to load a standard RGB JPEG.
 - **Import paths** (`train.py`): upstream's repo has `model/` and
   `utils/` as top-level packages; in pseudoraw they live under
-  `third_party/invisp/` instead. Patched the two import lines
+  `pseudoraw/third_party/invisp/` instead. Patched the two import lines
   accordingly; `dataset/` and `config/` ARE top-level here (matching
   upstream), so those imports are untouched.
 - **GPU auto-select** (`train.py`): upstream shells out to `nvidia-smi`

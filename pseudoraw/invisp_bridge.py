@@ -1,6 +1,6 @@
 """
 invisp_bridge.py — OUR OWN integration code (not vendored) wiring the
-actual InvISP network (third_party/invisp/, vendored upstream source)
+actual InvISP network (pseudoraw/third_party/invisp/, vendored upstream source)
 into pseudoraw, using the real pretrained checkpoints in pretrained/.
 
 IMPORTANT, stated plainly: this module requires PyTorch, which is not
@@ -23,7 +23,7 @@ easy to get wrong silently:
   premultiplied, bilinearly demosaiced to 3 channels, and normalized by
   the camera's bit-depth max (4095 for Canon 12-bit, 16383 for Nikon
   14-bit sensors -- see dataset/FiveK_dataset.py in the vendored copy's
-  upstream history / third_party/invisp/UPSTREAM_README.md for context).
+  upstream history / pseudoraw/third_party/invisp/UPSTREAM_README.md for context).
   net(x, rev=True) therefore returns that gamma-compressed
   representation. We undo the gamma (** 2.2) before handing the result
   to the rest of pseudoraw, which expects scene-linear data from this
@@ -75,7 +75,7 @@ def _load_net(camera: str, pretrained_dir: str, device):
     torch = _require_torch()
     # Import deferred to here so importing this module doesn't require
     # torch unless you actually call something that needs it.
-    from third_party.invisp.model.model import InvISPNet
+    from .third_party.invisp.model.model import InvISPNet
 
     if camera not in CAMERA_CHOICES:
         raise ValueError(f"camera must be one of {CAMERA_CHOICES}, got {camera!r}")

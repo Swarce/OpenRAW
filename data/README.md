@@ -69,7 +69,7 @@ and the Canon-specific black-level subtraction
 apparently never actually run, including for the official pretrained
 `canon.pth`.
 
-Unlike the `torch.qr` fix in `third_party/invisp/model/modules.py`, this
+Unlike the `torch.qr` fix in `pseudoraw/third_party/invisp/model/modules.py`, this
 is NOT patched here: that fix was pure environment-compatibility with a
 value immediately overwritten by checkpoint loading, provably harmless.
 This one changes what numbers the Canon training data actually contains

@@ -11,4 +11,4 @@ the code is written to be honest about that at every stage.
 from .pipeline import PseudoRawPipeline, PipelineConfig
 
 __all__ = ["PseudoRawPipeline", "PipelineConfig"]
-__version__ = "0.0.1-poc"
+from ._version import __version__

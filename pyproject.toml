@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pseudoraw"
+dynamic = ["version"]
+description = "Reconstruct pseudo-RAW linear DNGs from JPEGs for extra grading headroom (part of the OpenRAW project)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE.md", "pseudoraw/third_party/invisp/LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Riley", email = "riley026465@gmail.com" }]
+keywords = ["dng", "raw", "jpeg", "photography", "linear-dng", "invisp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+]
+dependencies = [
+    "numpy>=1.24",
+    # contrib build is required (cv2.ximgproc.guidedFilter); headless avoids GUI libs.
+    # NOTE: don't mix with plain opencv-python in one environment -- they clash over cv2.
+    "opencv-contrib-python-headless>=4.8",
+    "pillow>=10.0",
+    "tifffile>=2023.7",
+    # lossless-JPEG DNG tiles need imagecodecs bundling libjpeg-turbo >= 3
+    "imagecodecs>=2023.9.18",
+]
+
+[project.optional-dependencies]
+invisp = ["torch>=1.10"]
+dataprep = ["rawpy", "colour-demosaicing>=0.2"]
+training = ["torch>=1.10", "torchvision", "rawpy", "colour-demosaicing>=0.2"]
+# rawpy (= libraw) lets the tests check output in a real raw decoder, not just
+# tifffile reading back its own files -- that gap once hid a real bug.
+dev = ["pytest>=7.4", "rawpy"]
+
+[project.scripts]
+pseudoraw = "pseudoraw.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Swarce/OpenRAW"
+
+[tool.setuptools.dynamic]
+version = { attr = "pseudoraw._version.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["pseudoraw*"]
+
+[tool.setuptools.package-data]
+"pseudoraw.third_party.invisp" = ["LICENSE", "UPSTREAM_README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:torch.lu is deprecated:UserWarning"]

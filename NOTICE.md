@@ -1,6 +1,6 @@
 # Third-party attribution
 
-## third_party/invisp/ — vendored source code (not just cited)
+## pseudoraw/third_party/invisp/ — vendored source code (not just cited)
 
 This project vendors a subset of the actual source code from:
 
@@ -8,7 +8,7 @@ This project vendors a subset of the actual source code from:
 > **Invertible Image Signal Processing.** CVPR 2021.
 > Code: <https://github.com/yzxing87/Invertible-ISP>
 > Paper: <https://arxiv.org/abs/2103.15061>
-> License: **MIT** (full text preserved at `third_party/invisp/LICENSE`,
+> License: **MIT** (full text preserved at `pseudoraw/third_party/invisp/LICENSE`,
 > unmodified, as the license requires)
 
 ```bibtex
@@ -24,8 +24,8 @@ This project vendors a subset of the actual source code from:
 `model/model.py`, `model/modules.py`, `model/utils.py`, `model/loss.py`,
 `utils/JPEG.py`, `utils/JPEG_utils.py`, `utils/compression.py`,
 `utils/decompression.py`, `utils/commons.py`, and `LICENSE`. Plus the
-addition of `third_party/invisp/__init__.py` and
-`third_party/invisp/utils/__init__.py` (upstream's `utils/` wasn't a
+addition of `pseudoraw/third_party/invisp/__init__.py` and
+`pseudoraw/third_party/invisp/utils/__init__.py` (upstream's `utils/` wasn't a
 package; it needs to be here so it doesn't collide with any other
 top-level `utils` import in this project).
 
@@ -57,7 +57,7 @@ unpatched rather than silently "corrected" — see that file for why.
 [`TRAINING.md`](TRAINING.md) for the full workflow and three real fixes
 applied to get this running at all (not cosmetic): `train.py`'s import
 paths patched to match this repo's layout (`model`/`utils` live under
-`third_party/invisp/` here, not top-level as in upstream); `train.py`'s
+`pseudoraw/third_party/invisp/` here, not top-level as in upstream); `train.py`'s
 hard `nvidia-smi` shell-out replaced with an explicit CUDA check plus a
 non-fatal fallback instead of a confusing crash on any machine where
 `nvidia-smi` isn't on PATH in exactly the form upstream assumed; and
@@ -106,7 +106,7 @@ Before the real InvISP source and checkpoints were available to this
 project, `pseudoraw/ml/` was an independent NumPy re-implementation of
 InvISP's general architectural idea (Haar invertible downsampling +
 affine coupling blocks) — written from the paper/README description,
-not from upstream's code. It is now superseded by `third_party/invisp/`
+not from upstream's code. It is now superseded by `pseudoraw/third_party/invisp/`
 + `pseudoraw/invisp_bridge.py` and should not be extended further; see
 its own `__init__.py` docstring for why it's kept around at all (its
 exact-invertibility tests remain a legitimate, from-scratch demonstration

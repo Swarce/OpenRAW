@@ -32,6 +32,7 @@ import tifffile
 from .colormatrix import dng_color_matrix1
 from .exif_transfer import build_dng_extratags
 from .tonecurve import linear_to_srgb, srgb_to_linear
+from ._version import __version__
 
 DNG_PHOTOMETRIC_LINEAR_RAW = 34892
 CALIBRATION_ILLUMINANT_D65 = 21
@@ -215,11 +216,61 @@ def _main_image_payload(rgb16: np.ndarray, compression: str, bit_depth: int, thr
     )
     return _ljpeg_tiles(data, bit_depth, threads=threads), kwargs, raw_tags
 
+
+def _finalize_main_ifd(path: str, main_in_subifd: bool) -> None:
+    """
+    Post-write fix-up of the main raw IFD, in place. Why this exists:
+
+    DNG's LinearRaw PhotometricInterpretation (34892) is unknown to tifffile,
+    so tifffile has to GUESS how the 3 samples relate to it -- and different
+    tifffile versions guess differently. That bit this project twice: one
+    version wrote a spurious ExtraSamples tag (a real user bug), and a newer
+    one (2026.9.20, found in a clean-venv install test) miscounts the tile
+    layout and raises StopIteration. Patching around each version's guess is
+    a losing game, so the main image is written as plain RGB -- which every
+    tifffile version understands exactly -- and fixed up here:
+
+    - PhotometricInterpretation is set to 34892 (2-byte in-place edit).
+    - YCbCrSubSampling (530) / ReferenceBlackWhite (532) are removed:
+      tifffile adds them to ANY JPEG-compressed RGB IFD, but they're
+      meaningless for LinearRaw lossless-JPEG data. Removal = shift later
+      12-byte IFD entries up and decrement the entry count; the leftover
+      bytes are simply unreferenced, which is valid TIFF.
+
+    Result: byte-identical output across tifffile versions (verified on
+    2026.3.3 and 2026.9.20). Classic (non-Big) TIFF only -- tifffile writes
+    classic for files under 4GB, i.e. any realistic photo.
+    """
+    import struct
+
+    with tifffile.TiffFile(path) as tf:
+        if tf.is_bigtiff:
+            raise RuntimeError("unexpected BigTIFF output; _finalize_main_ifd supports classic TIFF only")
+        bo = tf.byteorder
+        page = tf.pages[0].pages[0] if main_in_subifd else tf.pages[0]
+        ifd_off = page.offset
+    with open(path, "r+b") as f:
+        f.seek(ifd_off)
+        (n,) = struct.unpack(bo + "H", f.read(2))
+        entries = [f.read(12) for _ in range(n)]
+        (next_ifd,) = struct.unpack(bo + "I", f.read(4))
+        kept = []
+        for e in entries:
+            code, typ, count = struct.unpack(bo + "HHI", e[:8])
+            if code in (530, 532):
+                continue
+            if code == 262:
+                e = e[:8] + struct.pack(bo + "H", DNG_PHOTOMETRIC_LINEAR_RAW) + e[10:]
+            kept.append(e)
+        f.seek(ifd_off)
+        f.write(struct.pack(bo + "H", len(kept)) + b"".join(kept) + struct.pack(bo + "I", next_ifd))
+        f.write(b"\0" * (12 * (n - len(kept))))  # zero the now-unused tail
+
 def write_linear_dng(
     path: str,
     rgb16: np.ndarray,
     source_jpeg_path: str = "",
-    pipeline_version: str = "0.0.1-poc",
+    pipeline_version: str = __version__,
     compression: str = "ljpeg",
     bit_depth: int = 12,
     threads: int | None = None,
@@ -347,7 +398,9 @@ def write_linear_dng(
     extratags = ifd0_extratags + raw_extratags  # single-IFD layout: all together
 
     main_kwargs = dict(
-        photometric=DNG_PHOTOMETRIC_LINEAR_RAW,
+        # Written as plain RGB, then patched to LinearRaw (34892) by
+        # _finalize_main_ifd -- see its docstring for why.
+        photometric="rgb",
         planarconfig="contig",
         description=description,
         software=f"pseudoraw {pipeline_version}",
@@ -381,6 +434,7 @@ def write_linear_dng(
 
     if not write_preview:
         tifffile.imwrite(path, main_data, **main_kwargs)
+        _finalize_main_ifd(path, main_in_subifd=False)
         return
 
     # Preview layout: IFD0 (preview) carries the DNG/EXIF tags, the raw
@@ -416,3 +470,4 @@ def write_linear_dng(
             **preview_kwargs,
         )
         tf.write(main_data, **main_kwargs)
+    _finalize_main_ifd(path, main_in_subifd=True)
