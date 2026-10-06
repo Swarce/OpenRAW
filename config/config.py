@@ -14,7 +14,18 @@ def get_arguments():
     parser.add_argument("--batch_size", type=int, default=BATCH_SIZE, help="Batch size for training. ")       
     parser.add_argument("--debug_mode", dest='debug_mode', action='store_true',  help="If debug mode, load less data.")    
     parser.add_argument("--gamma", dest='gamma', action='store_true', help="Use gamma compression for raw data.")     
-    parser.add_argument("--camera", type=str, default="NIKON_D700", choices=["NIKON_D700", "Canon_EOS_5D"], help="Choose which camera to use. ")    
+    # PATCHED (OpenRAW, not upstream): any FiveK camera, not just upstream's two.
+    # Repeatable / comma-separated; several cameras are pooled into one model.
+    # Accepts FiveK names ("Nikon D70") or prepared folder names ("NIKON_D700").
+    parser.add_argument("--camera", action="append", default=None,
+                        help="FiveK camera(s) to train on, e.g. 'Nikon D700' (repeatable). Default: NIKON_D700.")
+    parser.add_argument("--list-cameras", dest="list_cameras", action="store_true",
+                        help="list FiveK cameras with image counts and exit")
+    parser.add_argument("--download", action="store_true",
+                        help="download any missing DNGs for the chosen camera(s) before training")
+    parser.add_argument("--prepare-only", dest="prepare_only", action="store_true",
+                        help="download/preprocess the data, then exit (no GPU needed)")
+    parser.add_argument("--download-jobs", dest="download_jobs", type=int, default=4, help="parallel downloads")
     parser.add_argument("--rgb_weight", type=float, default=1, help="Weight for rgb loss. ")                 
     
     

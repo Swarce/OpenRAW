@@ -2,73 +2,86 @@
 
 The full workflow, start to finish. The upstream scripts were patched only
 where they were actually broken (listed below), not rewritten for style.
-An actual training step has not yet been run end to end — see "What's
-verified vs not" at the bottom.
+The data pipeline and a real training step (on CPU) are covered by tests;
+full GPU training runs are not yet verified — see the bottom of this page.
 
-## 1. Get the data
-
-Download MIT-Adobe FiveK from Adobe/MIT (the full set, or just the
-subset in `data/`). Worth knowing: `train.py` (below) only ever trains ONE camera at a time, and
-out of the box only has train/test splits for the same two cameras
-`canon.pth`/`nikon.pth` already cover (Canon EOS 5D, Nikon D700) — see
-`data/README.md`. Downloading the full 5,000-image set is still useful:
-it's a strict superset, and if you ever want to train a third camera
-model later, you'd build your own `<CAMERA>_train.txt`/`_test.txt` list
-(same bare-filename-per-line format as the existing ones) from whatever
-other camera subsets are in the full set — not wired up here, but the
-data would already be on disk if you want to go there.
-
-Either way, `data_preprocess.py` (already vendored, see `data/README.md`)
-needs the DNGs sitting at `data/NIKON_D700/DNG/*.dng` and
-`data/Canon_EOS_5D/DNG/*.dng` specifically — point your full-dataset
-download there, or symlink the relevant files in, matching those two
-folder names exactly (train.py's `--camera` flag and the dataset loader
-both key off them).
-
-## 2. Preprocess: DNG -> training pairs
+## Quick start
 
 ```bash
-pip install ".[dataprep]"
-cd data
-python3 data_preprocess.py --camera NIKON_D700
-python3 data_preprocess.py --camera Canon_EOS_5D
-cd ..
+pip install -e ".[training]"            # torch, rawpy, colour-demosaicing
+python train.py --list-cameras           # every FiveK camera + image count
+python train.py --task d70 --camera "Nikon D70" --download --gamma --aug
 ```
 
-Writes `data/<camera>/RAW/*.npz` (demosaiced RAW + white balance) and
-`data/<camera>/RGB/*.jpg` (rawpy's own default render — see
-`data/README.md`'s caveat about this not being the real in-camera JPEG).
+`train.py` resolves the camera, downloads **only that camera's** missing
+DNGs from MIT's server, preprocesses them into training pairs, writes the
+train/test lists, then trains. Re-running skips everything already done.
 
-Remember the real bug noted in `data/README.md`: Canon's black-level
-subtraction is dead code in this script (`'Canon EOD 5D'` typo), left
-unpatched deliberately since it's a training-data-content decision, not
-an environment fix. Decide if you want to fix that string before running
-this, or match what `canon.pth` itself was (apparently unintentionally)
-trained on.
+- **Several cameras**: repeat `--camera` (or use commas) to pool them into
+  one model — e.g. `--camera "Nikon D700" --camera "Canon EOS 5D"`. A
+  multi-camera model is arguably the more useful one for OpenRAW, since a
+  JPEG's source camera is often unknown.
+- **No GPU here?** `--prepare-only` downloads and preprocesses, then exits —
+  prepare on one machine, train on another (copy `data/`).
+- Names are matched loosely: `"D70"`, `"Nikon D70"` and `"NIKON_D70"` all
+  work; ambiguous ones are reported with suggestions.
+- `--debug_mode` loads 10 images per camera: a fast smoke test of the whole
+  pipeline before a real run.
 
-## 3. Train
+The standalone tools work too: `data/fivek_download.py` (download by camera,
+optionally expert TIFFs) and `data/fivek_prepare.py --camera ... --download`.
 
-```bash
-pip install ".[training]"
-python3 train.py --task my_nikon_run --camera NIKON_D700 --gamma --aug
+## Data layout
+
+```
+data/<CameraDir>/DNG/<name>.dng       downloaded originals (deletable after preprocessing)
+data/<CameraDir>/RAW/<name>.npz       demosaiced linear raw + white balance + levels
+data/<CameraDir>/RGB/<name>.jpg       rendered training target
+data/<CameraDir>_train.txt, _test.txt
+data/fivek/_metadata/*.json           FiveK camera/split metadata (cached)
 ```
 
-`--gamma` matches how `canon.pth`/`nikon.pth` were trained (see
-`invisp_bridge.py`'s docstring — the gamma-compression detail that
-module already has to undo at inference time). `--aug` enables upstream's
-random crop/flip/rotate augmentation. Useful flags from `config/config.py`
-and `train.py` itself: `--debug_mode` (loads only 10 images — a real
-smoke test, not a toy), `--resume` (continues from
-`<out_path>/<task>/checkpoint/latest.pth`), `--batch_size`, `--lr`,
-`--loss` (L1/L2).
+Splits: InvISP's two cameras (Nikon D700 → `NIKON_D700`, Canon EOS 5D →
+`Canon_EOS_5D`) keep InvISP's published lists, so results stay comparable
+with the shipped `canon.pth`/`nikon.pth`. Every other camera uses FiveK's
+official split (train + validation → train, test → test).
 
-Checkpoints land at `./exps/<task>/checkpoint/latest.pth` (every epoch)
-and `./exps/<task>/checkpoint/<epoch>.pth` (every 10 epochs). Once you
-have one you like, copy it to `pretrained/` and point
-`invisp_bridge.py`/`cli.py --invisp` at it the same way as the stock
-checkpoints — nothing else in the inference path needs to change, it was
-already written generically against "a checkpoint matching this
-architecture," not specifically the stock weights.
+## Preprocessing: what changed from upstream, and why
+
+Upstream's `data/data_preprocess.py` was written for InvISP's two cameras.
+Three assumptions in it silently break every other camera, so
+`data/fivek_prepare.py` reads them from each DNG instead:
+
+| | upstream | now |
+|---|---|---|
+| Bayer pattern | hardcoded RGGB | read from the file (RGGB/GRBG/BGGR/GBRG); a wrong pattern swaps colors |
+| black level | never subtracted | subtracted per CFA channel |
+| white level | 4095 for Canon EOS 5D, 16383 for all others | stored per image; the loader normalizes by it |
+
+Also new: demosaiced values are clipped to the white level (bilinear
+demosaicing overshoots to ~1.5× at image borders, physically impossible
+values upstream also produced), non-Bayer sensors are skipped rather than
+mis-decoded, and pairs are written atomically so an interrupted run never
+leaves half a pair.
+
+**Canon EOS 5D note:** because black level is now subtracted, Canon data
+prepared this way differs from what `canon.pth` was trained on (upstream's
+subtraction was dead code — see `data/README.md`). To reproduce upstream
+exactly, preprocess with `data/data_preprocess.py`; the loader still reads
+those files with upstream's original normalization.
+
+**Expert edits** (FiveK's retouched TIFFs) can be downloaded with
+`data/fivek_download.py --experts`, but aren't used as training targets:
+they're artistic retouches in ProPhoto RGB, while OpenRAW's input is camera
+JPEGs, so a model trained to invert them would learn the wrong mapping.
+
+## Training options
+
+`--gamma` matches how the shipped checkpoints were trained; `--aug` enables
+random crop/flip/rotate; also `--resume`, `--batch_size`, `--lr`, `--loss`.
+Checkpoints go to `./exps/<task>/checkpoint/` (`latest.pth` every epoch,
+`NNNN.pth` every 10). Copy one to `pretrained/` to use it with
+`openraw --invisp`.
 
 ## Real fixes applied to get here (not cosmetic — these were blockers)
 
@@ -103,23 +116,14 @@ necessary to run, document inline, never silently.
 
 ## What's verified vs not, stated plainly
 
-Verified so far (torch installed, no GPU):
-- Every import in `train.py`'s chain resolves correctly, including the
-  patched paths — confirmed by running it and watching it fail exactly
-  and only at the explicit CUDA check, nothing earlier or cryptic.
-- `DiffJPEG` (the differentiable JPEG simulator used in the training
-  loss) actually constructs and runs a forward pass correctly on CPU.
-- `dataset/FiveK_dataset.py` imports cleanly post-patch (the imread fix).
+Verified by the test suite (offline, with synthetic Bayer DNGs served from a
+local HTTP server behind fake FiveK metadata):
+- camera selection → download of only the missing files → preprocessing →
+  split lists, including resume/skip behaviour and deleted-DNG handling;
+- CFA pattern detection for all four Bayer layouts, black/white levels;
+- the loader pooling several cameras and normalizing per image;
+- one real InvISP forward + backward + optimizer step on CPU.
 
-NOT verified yet, because it needs a real GPU and downloaded data:
-- An actual training step (forward + backward + optimizer step) has
-  never run.
-- `FiveKDatasetTrain`/`FiveKDatasetTest`'s `__getitem__` (the actual
-  `.npz`/`.jpg` loading and augmentation) has never run against real
-  preprocessed data.
-- Multi-epoch training stability, loss curves, checkpoint quality —
-  none of that can be assessed without actually training.
-
-First thing to do when training: run with `--debug_mode`
-first (10 images, fast) to confirm the whole pipeline actually executes
-end to end on your machine before committing to a full run.
+Not yet verified: a full multi-epoch GPU training run, loss curves, and
+checkpoint quality — those need a GPU and the real dataset. Start any real
+run with `--debug_mode` first.

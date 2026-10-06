@@ -55,24 +55,22 @@ class BaseDataset(Dataset):
         input_RAWs_WBs = [] 
         target_RGBs = []        
         
-        data_path = self.data_path # ./data/ 
-        if is_train:
-            txt_path = data_path + self.camera_name + "_train.txt"
-        else:
-            txt_path = data_path + self.camera_name + "_test.txt"
+        data_path = self.data_path # ./data/
+        # PATCHED (OpenRAW, not upstream): accepts several cameras (a list,
+        # or a comma-separated string) and pools them into one dataset.
+        # Upstream took exactly one camera name.
+        cams = self.camera_name if isinstance(self.camera_name, (list, tuple)) else str(self.camera_name).split(",")
+        for cam in [c.strip() for c in cams if c.strip()]:
+            txt_path = data_path + cam + ("_train.txt" if is_train else "_test.txt")
+            with open(txt_path, "r") as f_read:
+                valid_camera_list = [line.strip() for line in f_read.readlines() if line.strip()]
+            if self.debug_mode:
+                valid_camera_list = valid_camera_list[:10]
+            for name in valid_camera_list:
+                full_name = data_path + cam
+                input_RAWs_WBs.append(full_name + "/RAW/" + name + ".npz")
+                target_RGBs.append(full_name + "/RGB/" + name + ".jpg")
 
-        with open(txt_path, "r") as f_read:
-            # valid_camera_list = [os.path.basename(line.strip()).split('.')[0] for line in f_read.readlines()] 
-            valid_camera_list = [line.strip() for line in f_read.readlines()] 
-        
-        if self.debug_mode:
-            valid_camera_list = valid_camera_list[:10]
-        
-        for i,name in enumerate(valid_camera_list): 
-            full_name = data_path + self.camera_name 
-            input_RAWs_WBs.append(full_name + "/RAW/" + name + ".npz") 
-            target_RGBs.append(full_name + "/RGB/" + name + ".jpg") 
-            
         return input_RAWs_WBs, target_RGBs 
 
 

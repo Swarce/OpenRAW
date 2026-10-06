@@ -1,4 +1,11 @@
-# Training data: MIT-Adobe FiveK, Canon EOS 5D + Nikon D700 subset
+# Training data: MIT-Adobe FiveK
+
+> **Most users want `train.py --camera ... --download`** — see
+> [docs/training.md](../docs/training.md). It works for any FiveK camera and
+> handles download, preprocessing and splits. This page documents the
+> original InvISP subset and upstream's preprocessing script.
+
+## The InvISP subset: Canon EOS 5D + Nikon D700
 
 This is the exact subset InvISP's own `canon.pth`/`nikon.pth` were trained
 and evaluated on — not the full 5,000-image FiveK dataset (47.34 GB).

@@ -37,7 +37,7 @@ dataprep = ["rawpy", "colour-demosaicing>=0.2"]
 training = ["torch>=1.10", "torchvision", "rawpy", "colour-demosaicing>=0.2"]
 # rawpy (= libraw) lets the tests check output in a real raw decoder, not just
 # tifffile reading back its own files -- that gap once hid a real bug.
-dev = ["pytest>=7.4", "rawpy"]
+dev = ["pytest>=7.4", "rawpy", "colour-demosaicing>=0.2"]
 
 [project.scripts]
 openraw = "openraw.cli:main"
