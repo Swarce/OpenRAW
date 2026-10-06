@@ -45,6 +45,7 @@ class PipelineConfig:
     # See dng_writer.write_linear_dng for the measured size/precision table.
     dng_compression: str = "ljpeg"  # or "none"
     dng_bit_depth: int = 12  # 16 (bit-exact), 14, 12, 10
+    encode_threads: int | None = None  # LJPEG tile-encoding threads; None = all cores
     preserve_exif: bool = True  # no GPS ever -- dropped entirely, see exif_transfer.py
     write_preview: bool = True  # small JPEG preview + SubIFD main image -- see dng_writer.py
     preview_max_dim: int = 1024
@@ -132,6 +133,7 @@ class PseudoRawPipeline:
             pipeline_version=_PIPELINE_VERSION,
             compression=cfg.dng_compression,
             bit_depth=cfg.dng_bit_depth,
+            threads=cfg.encode_threads,
             exif_fields=result.decoded.exif_fields if cfg.preserve_exif else None,
             write_preview=cfg.write_preview,
             preview_max_dim=cfg.preview_max_dim,

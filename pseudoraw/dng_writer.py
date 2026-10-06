@@ -145,24 +145,45 @@ def _encode_codes(rgb16: np.ndarray, table: np.ndarray) -> np.ndarray:
     return code.astype(np.uint16)
 
 
-def _ljpeg_tiles(data: np.ndarray, bits: int, tile: int = LJPEG_TILE):
+def _ljpeg_tiles(data: np.ndarray, bits: int, tile: int = LJPEG_TILE, threads: int | None = None):
     """Yield each tile as a 3-component lossless JPEG (ITU T.81 process 14,
     predictor 1, no color transform) -- the layout Adobe's own DNG Converter
-    uses for linear DNGs. Edge tiles are zero-padded to full tile size."""
+    uses for linear DNGs. Edge tiles are zero-padded to full tile size.
+
+    Tiles are independent, and imagecodecs releases the GIL while encoding,
+    so a thread pool gives real parallelism here. executor.map preserves
+    order, which matters: tifffile writes tiles in the order yielded, so the
+    output is byte-identical to single-threaded (pinned by a test).
+    threads: None/0 = os.cpu_count(); 1 = no pool at all.
+    """
     import imagecodecs
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
     h, w, c = data.shape
-    for ty in range(0, h, tile):
-        for tx in range(0, w, tile):
-            t = np.zeros((tile, tile, c), dtype=np.uint16)
-            blk = data[ty:ty + tile, tx:tx + tile]
-            t[:blk.shape[0], :blk.shape[1]] = blk
-            yield imagecodecs.jpeg8_encode(
-                t, lossless=True, predictor=1, bitspersample=bits,
-                colorspace="RGB", outcolorspace="RGB",
-            )
+    coords = [(ty, tx) for ty in range(0, h, tile) for tx in range(0, w, tile)]
+
+    def encode(yx):
+        ty, tx = yx
+        t = np.zeros((tile, tile, c), dtype=np.uint16)
+        blk = data[ty:ty + tile, tx:tx + tile]
+        t[:blk.shape[0], :blk.shape[1]] = blk
+        return imagecodecs.jpeg8_encode(
+            t, lossless=True, predictor=1, bitspersample=bits,
+            colorspace="RGB", outcolorspace="RGB",
+        )
+
+    n = threads or os.cpu_count() or 1
+    if n <= 1:
+        yield from map(encode, coords)
+        return
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        # map() submits everything up front; at ~50KB/tile even an 18MP image
+        # is ~1000 tiles / ~50MB in flight, same order as the file itself.
+        yield from pool.map(encode, coords)
 
 
-def _main_image_payload(rgb16: np.ndarray, compression: str, bit_depth: int):
+def _main_image_payload(rgb16: np.ndarray, compression: str, bit_depth: int, threads: int | None = None):
     """Return (data, extra_write_kwargs, extra_raw_ifd_tags) for the main image."""
     if compression == "none":
         # Uncompressed is always bit-exact 16-bit linear (bit_depth ignored).
@@ -192,7 +213,7 @@ def _main_image_payload(rgb16: np.ndarray, compression: str, bit_depth: int):
         bitspersample=bit_depth,  # explicit: tifffile otherwise assumes 12 for JPEG+uint16
         tile=(LJPEG_TILE, LJPEG_TILE),
     )
-    return _ljpeg_tiles(data, bit_depth), kwargs, raw_tags
+    return _ljpeg_tiles(data, bit_depth, threads=threads), kwargs, raw_tags
 
 def write_linear_dng(
     path: str,
@@ -201,6 +222,7 @@ def write_linear_dng(
     pipeline_version: str = "0.0.1-poc",
     compression: str = "ljpeg",
     bit_depth: int = 12,
+    threads: int | None = None,
     exif_fields: dict | None = None,
     write_preview: bool = True,
     preview_max_dim: int = 1024,
@@ -235,6 +257,8 @@ def write_linear_dng(
         deband/dither headroom survives intact. For scale: the source's
         own 8-bit pixels with zero headroom need ~24MB losslessly -- the
         6MB JPEG is only that small because it discards information.
+    threads: worker threads for lossless-JPEG tile encoding. None (default) =
+        all CPU cores; 1 = single-threaded. Output is byte-identical either way.
     exif_fields: output of exif_transfer.extract_exif() on the source
         JPEG's PIL Exif object, or None. When given, real camera metadata
         (Make/Model/lens/exposure/ISO/focal length/orientation/etc -- see
@@ -350,7 +374,7 @@ def write_linear_dng(
         # explicit and version-independent.
         extrasamples=(),
     )
-    main_data, main_extra, main_raw_tags = _main_image_payload(rgb16, compression, bit_depth)
+    main_data, main_extra, main_raw_tags = _main_image_payload(rgb16, compression, bit_depth, threads)
     main_kwargs.update(main_extra)
     raw_extratags = raw_extratags + main_raw_tags  # LinearizationTable is a raw-IFD tag
     main_kwargs["extratags"] = main_kwargs["extratags"] + main_raw_tags
