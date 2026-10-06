@@ -1,5 +1,5 @@
 """
-Tests for pseudoraw/ml/ -- the InvISP-inspired invertible network
+Tests for openraw/ml/ -- the InvISP-inspired invertible network
 groundwork. These exist to prove the one claim this scaffold is actually
 allowed to make: forward() and inverse() are exact inverses of each
 other, independent of the (currently untrained/random) subnet weights.
@@ -11,9 +11,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pseudoraw.ml.haar import forward_haar, inverse_haar, _H
-from pseudoraw.ml.coupling import AffineCouplingBlock
-from pseudoraw.ml.invnet import InvISPLiteNet
+from openraw.ml.haar import forward_haar, inverse_haar, _H
+from openraw.ml.coupling import AffineCouplingBlock
+from openraw.ml.invnet import InvISPLiteNet
 
 
 def test_haar_matrix_is_orthonormal_and_symmetric():

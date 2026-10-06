@@ -1,11 +1,11 @@
 """
 Command-line interface: single files, many files, or whole folders.
 
-    pseudoraw photo.jpg                      -> photo.dng next to it
-    pseudoraw photo.jpg out.dng              -> explicit output file (legacy form)
-    pseudoraw a.jpg b.jpg -o converted/      -> into a folder
-    pseudoraw ~/Pictures/trip -r -o out/     -> whole tree, structure mirrored
-    pseudoraw folder/ --jobs 2               -> two files at a time
+    openraw photo.jpg                      -> photo.dng next to it
+    openraw photo.jpg out.dng              -> explicit output file (legacy form)
+    openraw a.jpg b.jpg -o converted/      -> into a folder
+    openraw ~/Pictures/trip -r -o out/     -> whole tree, structure mirrored
+    openraw folder/ --jobs 2               -> two files at a time
 
 Batch behavior, chosen for long runs: existing outputs are skipped unless
 --overwrite (re-running a half-finished batch resumes instead of redoing
@@ -23,7 +23,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 
-from .pipeline import PipelineConfig, PseudoRawPipeline
+from .pipeline import PipelineConfig, OpenRawPipeline
 
 JPEG_EXTS = {".jpg", ".jpeg"}
 
@@ -33,7 +33,7 @@ def _version_report() -> str:
     was library-version-dependent, so bug reports should include this."""
     import platform
     from . import __version__
-    lines = [f"pseudoraw {__version__} (OpenRAW)", f"python {platform.python_version()} on {platform.system()} {platform.machine()}"]
+    lines = [f"OpenRAW {__version__}", f"python {platform.python_version()} on {platform.system()} {platform.machine()}"]
     for mod in ("numpy", "cv2", "PIL", "tifffile", "imagecodecs", "rawpy", "torch"):
         try:
             m = __import__(mod)
@@ -51,7 +51,7 @@ def _version_report() -> str:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="pseudoraw",
+        prog="openraw",
         description="Reconstruct pseudo-RAW linear DNGs from JPEGs (part of the OpenRAW project).",
     )
     p.add_argument("--version", action="store_true",
@@ -90,7 +90,7 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--gamut-widen", type=float, default=0.0,
                    help="EXPERIMENTAL gamut widening -- a look, not a reconstruction (0 = off)")
 
-    m = p.add_argument_group("InvISP network (needs torch: pip install 'pseudoraw[invisp]')")
+    m = p.add_argument_group("InvISP network (needs torch: pip install 'openraw[invisp]')")
     m.add_argument("--invisp", action="store_true", help="use the InvISP network instead of the classical stages")
     m.add_argument("--invisp-camera", choices=["NIKON_D700", "Canon_EOS_5D"], default="NIKON_D700")
     m.add_argument("--invisp-pretrained-dir", default="pretrained")
@@ -181,7 +181,7 @@ def _convert_one(src: str, dst: str, config: PipelineConfig) -> dict:
     try:
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
         tmp = dst + ".partial"  # write-then-rename: an interrupted run never leaves a truncated .dng
-        result = PseudoRawPipeline(config).run_to_dng(src, tmp)
+        result = OpenRawPipeline(config).run_to_dng(src, tmp)
         os.replace(tmp, dst)
         d = result.decoded
         n_exif = len(d.exif_fields.get("ifd0", {})) + len(d.exif_fields.get("exif_sub", {})) if d.exif_fields else 0
@@ -212,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     if "--version" in argv:  # handled before argparse: lazy (imports torch etc.) and keeps line breaks
         print(_version_report())
         return 0
-    # Legacy form: `pseudoraw in.jpg out.dng` (two positionals, second a .dng).
+    # Legacy form: `openraw in.jpg out.dng` (two positionals, second a .dng).
     if len(argv) >= 2 and not argv[1].startswith("-") and argv[1].lower().endswith(".dng") \
             and "-o" not in argv and "--output" not in argv:
         argv = [argv[0], "-o", argv[1]] + argv[2:]

@@ -5,6 +5,12 @@ summarized; commit messages carry the full detail and measurements.
 
 ## [Unreleased] — 0.1.0.dev0
 
+### Changed
+- **Renamed to OpenRAW**: package `pseudoraw` → `openraw`, command
+  `pseudoraw` → `openraw`, `PseudoRawPipeline` → `OpenRawPipeline`,
+  `PSEUDORAW_DNG_VALIDATE` → `OPENRAW_DNG_VALIDATE`. DNGs now identify as
+  `OpenRAW` (Make/Software) and `OpenRAW virtual sensor` (UniqueCameraModel).
+
 ### Added
 - **Batch conversion**: files and folders, `-r` recursive with mirrored
   output tree, `--jobs` for parallel files. Re-runs skip finished outputs
@@ -17,8 +23,8 @@ summarized; commit messages carry the full detail and measurements.
 - Embedded JPEG preview in the standard preview + SubIFD layout.
 - Camera EXIF passthrough (make, model, lens, exposure, ISO, focal length,
   orientation, capture time). Never fabricated when absent; GPS never copied.
-- Packaging: `pyproject.toml`, `pseudoraw` command, extras `[invisp]`,
-  `[dataprep]`, `[training]`, `[dev]`. `pseudoraw --version` reports key
+- Packaging: `pyproject.toml`, `openraw` command, extras `[invisp]`,
+  `[dataprep]`, `[training]`, `[dev]`. `openraw --version` reports key
   library versions for bug reports.
 - CI on Linux/Windows/macOS, with Adobe's `dng_validate` and a clean-venv
   wheel install; `tools/build_dng_validate.sh` to run the validator locally.
@@ -26,6 +32,8 @@ summarized; commit messages carry the full detail and measurements.
   upstream code and official checkpoints; training scaffolding for FiveK.
 
 ### Fixed
+- Privacy: DNG ImageDescription embedded the full source path (e.g. your
+  user account name and folder layout); now only the filename.
 - DNGs rejected by Adobe-SDK readers (Android/Skia, Luminar): `DNGVersion`
   and other identity tags had ended up outside IFD0.
 - Debanding softened whole images (~40% measured detail loss); its

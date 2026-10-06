@@ -1,4 +1,4 @@
-"""Tests for the batch/folder CLI (pseudoraw/cli.py)."""
+"""Tests for the batch/folder CLI (openraw/cli.py)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from pseudoraw.cli import main, plan_jobs
+from openraw.cli import main, plan_jobs
 
 
 def _jpeg(path: Path, seed: int = 0) -> Path:
@@ -111,7 +111,7 @@ def test_parallel_jobs_produce_same_files_as_serial(tmp_path):
 
 def test_threaded_tile_encoding_is_byte_identical(tmp_path):
     """Threads must only change speed, never output: tile order is preserved."""
-    from pseudoraw.dng_writer import write_linear_dng
+    from openraw.dng_writer import write_linear_dng
     x = (np.random.default_rng(0).random((600, 700, 3)) * 65535).astype(np.uint16)
     digests = set()
     for t in (1, 3, 8):
@@ -124,9 +124,9 @@ def test_threaded_tile_encoding_is_byte_identical(tmp_path):
 def test_version_reports_package_and_libraries(capsys):
     """Bug reports need library versions -- nearly every bug so far was
     version-dependent. Also handled before argparse, so it needs no inputs."""
-    from pseudoraw import __version__
+    from openraw import __version__
     assert main(["--version"]) == 0
     out = capsys.readouterr().out
-    assert f"pseudoraw {__version__}" in out
+    assert f"OpenRAW {__version__}" in out
     for lib in ("numpy", "tifffile", "imagecodecs"):
         assert lib in out

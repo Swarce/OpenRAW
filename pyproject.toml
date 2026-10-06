@@ -3,12 +3,12 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pseudoraw"
+name = "openraw"
 dynamic = ["version"]
 description = "Reconstruct pseudo-RAW linear DNGs from JPEGs for extra grading headroom (part of the OpenRAW project)"
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENSE", "NOTICE.md", "pseudoraw/third_party/invisp/LICENSE"]
+license-files = ["LICENSE", "NOTICE.md", "openraw/third_party/invisp/LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "Riley", email = "riley026465@gmail.com" }]
 keywords = ["dng", "raw", "jpeg", "photography", "linear-dng", "invisp"]
@@ -40,19 +40,19 @@ training = ["torch>=1.10", "torchvision", "rawpy", "colour-demosaicing>=0.2"]
 dev = ["pytest>=7.4", "rawpy"]
 
 [project.scripts]
-pseudoraw = "pseudoraw.cli:main"
+openraw = "openraw.cli:main"
 
 [project.urls]
 Repository = "https://github.com/Swarce/OpenRAW"
 
 [tool.setuptools.dynamic]
-version = { attr = "pseudoraw._version.__version__" }
+version = { attr = "openraw._version.__version__" }
 
 [tool.setuptools.packages.find]
-include = ["pseudoraw*"]
+include = ["openraw*"]
 
 [tool.setuptools.package-data]
-"pseudoraw.third_party.invisp" = ["LICENSE", "UPSTREAM_README.md"]
+"openraw.third_party.invisp" = ["LICENSE", "UPSTREAM_README.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

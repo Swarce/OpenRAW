@@ -314,7 +314,7 @@ class InvertibleConv1x1(nn.Module):
     def __init__(self, num_channels, LU_decomposed):
         super().__init__()
         w_shape = [num_channels, num_channels]
-        # PATCHED (pseudoraw, not upstream): torch.qr was removed outright
+        # PATCHED (OpenRAW, not upstream): torch.qr was removed outright
         # in modern torch (torch.lu/torch.lu_unpack just below still work,
         # deprecated-but-functional, so those are untouched). This value
         # is immediately overwritten by load_state_dict() from a

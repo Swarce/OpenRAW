@@ -1,6 +1,6 @@
 """
 invnet.py — stacks haar.py + coupling.py into the full invertible
-network shape (architecture credit: see pseudoraw/ml/__init__.py).
+network shape (architecture credit: see openraw/ml/__init__.py).
 
 InvISPLiteNet.forward(jpeg_rgb) and .inverse(z) are EXACT inverses of
 each other by construction -- true regardless of whether the internal

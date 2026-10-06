@@ -64,7 +64,7 @@ jobs:
         run: python -m pip install -e ".[dev]"
       - name: Test with Adobe validator
         env:
-          PSEUDORAW_DNG_VALIDATE: ${{ github.workspace }}/.dng_validate_build/dng_validate
+          OPENRAW_DNG_VALIDATE: ${{ github.workspace }}/.dng_validate_build/dng_validate
         run: |
           python -m pytest -q
           # every Adobe test must have RUN, not silently skipped
@@ -89,7 +89,7 @@ jobs:
         run: |
           python -m venv /tmp/v
           /tmp/v/bin/pip install dist/*.whl
-          cd /tmp && /tmp/v/bin/pseudoraw "$GITHUB_WORKSPACE/examples/test_source.jpg" -o /tmp/out.dng
+          cd /tmp && /tmp/v/bin/openraw "$GITHUB_WORKSPACE/examples/test_source.jpg" -o /tmp/out.dng
           test -s /tmp/out.dng
       - uses: actions/upload-artifact@v4
         with:

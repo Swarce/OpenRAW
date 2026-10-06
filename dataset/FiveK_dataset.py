@@ -11,7 +11,7 @@ import numbers
 from .base_dataset import BaseDataset
 
 
-# PATCHED (pseudoraw, not upstream): the original here was
+# PATCHED (OpenRAW, not upstream): the original here was
 #   from scipy.misc import imread
 # scipy.misc.imread was removed from scipy years ago (deprecated ~2018,
 # gone entirely by the scipy version this project actually has

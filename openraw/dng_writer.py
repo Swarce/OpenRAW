@@ -19,7 +19,7 @@ what's copied, what's deliberately not (MakerNote, GPS by default), and
 why. Make/Model specifically: when the source JPEG has them, the real
 camera's values are written (useful for lens-correction lookups, display,
 etc in raw converters) and UniqueCameraModel is still always
-"pseudoraw virtual sensor" regardless, so readers can't mistake this for
+"OpenRAW virtual sensor" regardless, so readers can't mistake this for
 that camera's actual sensor data even while the real Make/Model is shown.
 """
 
@@ -198,7 +198,7 @@ def _main_image_payload(rgb16: np.ndarray, compression: str, bit_depth: int, thr
         imagecodecs.jpeg8_encode(np.zeros((8, 8, 3), np.uint16), lossless=True, predictor=1,
                                  bitspersample=bit_depth, colorspace="RGB", outcolorspace="RGB")
     except Exception as e:
-        print(f"[pseudoraw] lossless JPEG unavailable ({type(e).__name__}: {e}) -- install/upgrade "
+        print(f"[openraw] lossless JPEG unavailable ({type(e).__name__}: {e}) -- install/upgrade "
               f"'imagecodecs' (>=2023.9.18). Writing UNCOMPRESSED (larger, still valid) instead.")
         return rgb16, {}, []
     raw_tags = []
@@ -338,8 +338,11 @@ def write_linear_dng(
 
     color_matrix1 = dng_color_matrix1()
 
+    # Filename only, never the full path: a path like C:\\Users\\<name>\\... would
+    # leak the user's account name and folder layout into every shared DNG.
+    source_name = source_jpeg_path.replace("\\", "/").rsplit("/", 1)[-1]
     description = (
-        f"pseudoraw POC reconstruction from JPEG ({source_jpeg_path}). "
+        f"OpenRAW reconstruction from JPEG ({source_name}). "
         f"NOT real sensor RAW data -- a linear reconstruction for extra "
         f"grading headroom. pipeline={pipeline_version}"
     )
@@ -354,11 +357,11 @@ def write_linear_dng(
         # UniqueCameraModel: ASCII -- always this, regardless of real
         # camera info below, so a reader can never mistake this for that
         # camera's actual sensor data (see module docstring).
-        50708: (50708, "s", 0, "pseudoraw virtual sensor", False),
+        50708: (50708, "s", 0, "OpenRAW virtual sensor", False),
         # Make / Model placeholders -- overridden below if the source
         # JPEG actually had real camera EXIF.
-        271: (271, "s", 0, "pseudoraw", False),
-        272: (272, "s", 0, "pseudoraw-poc", False),
+        271: (271, "s", 0, "OpenRAW", False),
+        272: (272, "s", 0, "OpenRAW", False),
         # CalibrationIlluminant1: SHORT, D65
         50778: (50778, "H", 1, CALIBRATION_ILLUMINANT_D65, False),
         # ColorMatrix1: SRATIONAL[9], XYZ(D65) -> camera-native(=linear sRGB)
@@ -403,7 +406,7 @@ def write_linear_dng(
         photometric="rgb",
         planarconfig="contig",
         description=description,
-        software=f"pseudoraw {pipeline_version}",
+        software=f"OpenRAW {pipeline_version}",
         extratags=extratags,
         metadata=None,  # don't let tifffile add its own JSON/OME shape metadata
         subfiletype=0,  # full-resolution image (vs. the preview's subfiletype=1 below)
@@ -444,7 +447,7 @@ def write_linear_dng(
     preview = _make_preview(rgb16, max_dim=preview_max_dim)
     preview_kwargs, preview_warning = _preview_write_kwargs(preview_quality)
     if preview_warning:
-        print(f"[pseudoraw] {preview_warning}")
+        print(f"[openraw] {preview_warning}")
 
     # Standard DNG structure: IFD0 = small preview (what a basic viewer
     # or quick-look reads first), main full-res data in a SubIFD (tag
@@ -459,7 +462,7 @@ def write_linear_dng(
             preview,
             subfiletype=1,  # reduced-resolution image
             subifds=1,  # reserve one SubIFD slot for the main image below
-            description=f"pseudoraw preview ({preview.shape[1]}x{preview.shape[0]})",
+            description=f"OpenRAW preview ({preview.shape[1]}x{preview.shape[0]})",
             extratags=ifd0_extratags,  # DNGVersion etc MUST be in IFD0 -- see above
             metadata=None,  # same as the main write -- without this, tifffile
             # tries to parse our custom description as its own auto-generated

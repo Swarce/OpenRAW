@@ -12,7 +12,7 @@
 # structural DNG/TIFF validation and full decoding are unaffected.
 #
 # Usage:  tools/build_dng_validate.sh [build_dir]    (Linux/macOS, needs g++, zlib)
-#         then: PSEUDORAW_DNG_VALIDATE=<build_dir>/dng_validate pytest tests/
+#         then: OPENRAW_DNG_VALIDATE=<build_dir>/dng_validate pytest tests/
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 B="${1:-$HERE/../.dng_validate_build}"

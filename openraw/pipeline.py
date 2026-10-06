@@ -51,7 +51,7 @@ class PipelineConfig:
     preview_max_dim: int = 1024
     preview_quality: int = 90
 
-    # Real InvISP network path (pseudoraw/invisp_bridge.py), as an
+    # Real InvISP network path (openraw/invisp_bridge.py), as an
     # alternative to the classical deblock/chroma/tonecurve stages above.
     # Requires torch + a matching checkpoint in pretrained/ -- see
     # invisp_bridge.py's module docstring for exactly what this does and
@@ -71,7 +71,7 @@ class PipelineResult:
     rgb16: np.ndarray  # uint16, final data written to DNG
 
 
-class PseudoRawPipeline:
+class OpenRawPipeline:
     def __init__(self, config: PipelineConfig | None = None):
         self.config = config or PipelineConfig()
 

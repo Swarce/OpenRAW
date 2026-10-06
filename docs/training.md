@@ -81,8 +81,8 @@ necessary to run, document inline, never silently.
   PIL for other things). Dead-simple, behavior-preserving — it was only
   ever used to load a standard RGB JPEG.
 - **Import paths** (`train.py`): upstream's repo has `model/` and
-  `utils/` as top-level packages; in pseudoraw they live under
-  `pseudoraw/third_party/invisp/` instead. Patched the two import lines
+  `utils/` as top-level packages; in OpenRAW they live under
+  `openraw/third_party/invisp/` instead. Patched the two import lines
   accordingly; `dataset/` and `config/` ARE top-level here (matching
   upstream), so those imports are untouched.
 - **GPU auto-select** (`train.py`): upstream shells out to `nvidia-smi`

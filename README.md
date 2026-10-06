@@ -4,8 +4,7 @@
 shadows, and colors in Lightroom, Luminar, darktable, RawTherapee, or any
 raw editor, from cameras and phones that never gave you a raw file.
 
-> **Status: alpha.** Usable and tested, but young. The Python package and
-> command are currently named `pseudoraw`.
+> **Status: alpha.** Usable and tested, but young.
 
 ## What it is — and what it isn't
 
@@ -45,10 +44,10 @@ pip install .
 ## Use
 
 ```bash
-pseudoraw photo.jpg                     # -> photo.dng next to it
-pseudoraw photo.jpg -o edited/          # into a folder
-pseudoraw ~/Pictures/trip -r -o dngs/   # a whole folder tree, structure kept
-pseudoraw ~/Pictures/trip -r --jobs 2   # two photos at a time
+openraw photo.jpg                     # -> photo.dng next to it
+openraw photo.jpg -o edited/          # into a folder
+openraw ~/Pictures/trip -r -o dngs/   # a whole folder tree, structure kept
+openraw ~/Pictures/trip -r --jobs 2   # two photos at a time
 ```
 
 Batch runs are safe to interrupt and re-run: finished files are skipped
@@ -74,9 +73,10 @@ cameras use for raw), verified in both Adobe's DNG SDK and libraw.
 
 Camera and lens info from the JPEG (make, model, lens, aperture, shutter,
 ISO, focal length, orientation, capture time) is carried into the DNG when
-present — never invented when absent. **GPS location is never copied.**
+present — never invented when absent. **GPS location is never copied**, and
+neither is the folder path of your source files.
 
-Run `pseudoraw --help` for every option.
+Run `openraw --help` for every option.
 
 ## Tips
 

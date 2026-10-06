@@ -1,11 +1,11 @@
 """
-pseudoraw.ml — SUPERSEDED. This was an independent NumPy re-
+openraw.ml — SUPERSEDED. This was an independent NumPy re-
 implementation of InvISP's general architecture (Haar invertible
 downsampling + affine coupling blocks), built before the actual InvISP
 source and pretrained checkpoints were available to this project.
 
-It is no longer the path forward: `pseudoraw/third_party/invisp/` now vendors
-InvISP's real PyTorch source, and `pseudoraw/invisp_bridge.py` wires it
+It is no longer the path forward: `openraw/third_party/invisp/` now vendors
+InvISP's real PyTorch source, and `openraw/invisp_bridge.py` wires it
 up with the real pretrained checkpoints in `pretrained/` (canon.pth,
 nikon.pth). Use `cli.py --invisp` for that, not this package.
 
@@ -16,7 +16,7 @@ construction -- useful as a from-scratch explanation separate from
 reading upstream's actual (more complex: learnable invertible 1x1 convs,
 1-vs-2 channel splits rather than Haar-doubling) implementation. It is
 not wired into pipeline.py and should not be extended further; put new
-work into invisp_bridge.py / pseudoraw/third_party/invisp/ instead.
+work into invisp_bridge.py / openraw/third_party/invisp/ instead.
 
 Original docstring, for reference:
 

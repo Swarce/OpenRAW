@@ -7,7 +7,7 @@ real editors are as valuable as code.
 
 Please include:
 
-- the output of `pseudoraw --version` (almost every bug so far has depended
+- the output of `openraw --version` (almost every bug so far has depended
   on a library version — tifffile, imagecodecs, OpenCV)
 - the exact command you ran
 - which app failed to open the DNG, and its exact error message
@@ -41,7 +41,7 @@ Luminar, Android) reject. Build Adobe's validator once:
 
 ```bash
 tools/build_dng_validate.sh                     # Linux/macOS; needs g++ and zlib
-export PSEUDORAW_DNG_VALIDATE=$PWD/.dng_validate_build/dng_validate
+export OPENRAW_DNG_VALIDATE=$PWD/.dng_validate_build/dng_validate
 python -m pytest                                # Adobe tests now actually run
 ```
 
@@ -60,7 +60,7 @@ behind it, and the dead ends already explored.
 - **Measure, don't assume.** Quality claims come with numbers (sharpness,
   error in source quantization steps, file size), and a test pins them.
 - **Patch vendored code minimally and visibly.** Changes under
-  `pseudoraw/third_party/` get a `PATCHED (pseudoraw, not upstream)`
+  `openraw/third_party/` get a `PATCHED (OpenRAW, not upstream)`
   comment and a note in [NOTICE.md](NOTICE.md). Fix what's broken; leave
   the rest as upstream wrote it.
 - **Privacy by default.** GPS is never copied.

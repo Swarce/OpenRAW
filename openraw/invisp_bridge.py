@@ -1,7 +1,7 @@
 """
 invisp_bridge.py — OUR OWN integration code (not vendored) wiring the
-actual InvISP network (pseudoraw/third_party/invisp/, vendored upstream source)
-into pseudoraw, using the real pretrained checkpoints in pretrained/.
+actual InvISP network (openraw/third_party/invisp/, vendored upstream source)
+into openraw, using the real pretrained checkpoints in pretrained/.
 
 IMPORTANT, stated plainly: this module requires PyTorch, which is not
 installable in the sandbox this project was built in (no disk headroom --
@@ -23,14 +23,14 @@ easy to get wrong silently:
   premultiplied, bilinearly demosaiced to 3 channels, and normalized by
   the camera's bit-depth max (4095 for Canon 12-bit, 16383 for Nikon
   14-bit sensors -- see dataset/FiveK_dataset.py in the vendored copy's
-  upstream history / pseudoraw/third_party/invisp/UPSTREAM_README.md for context).
+  upstream history / openraw/third_party/invisp/UPSTREAM_README.md for context).
   net(x, rev=True) therefore returns that gamma-compressed
   representation. We undo the gamma (** 2.2) before handing the result
-  to the rest of pseudoraw, which expects scene-linear data from this
+  to the rest of openraw, which expects scene-linear data from this
   point on (matching what tonecurve.srgb_to_linear produces on the
   classical path).
 - The "RGB" side is plain sRGB-gamma pixels normalized by 255 -- exactly
-  what pseudoraw.decode.load_jpeg(...).rgb already is. No extra
+  what openraw.decode.load_jpeg(...).rgb already is. No extra
   preprocessing needed on that side.
 - Each checkpoint is camera-specific (upstream's own README says so
   explicitly: "one trained model can only be applied for a specific
@@ -64,7 +64,7 @@ def _require_torch():
     except ImportError as e:
         raise ImportError(
             "invisp_bridge needs PyTorch, which isn't installed. "
-            "pip install 'pseudoraw[invisp]' (torch is kept out of the "
+            "pip install 'openraw[invisp]' (torch is kept out of the "
             "base install since the classical deterministic "
             "pipeline in cli.py doesn't need it)."
         ) from e

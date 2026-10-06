@@ -14,7 +14,7 @@ rendered sRGB. Full attribution in [NOTICE.md](../NOTICE.md).
 
 ```bash
 pip install ".[invisp]"     # adds PyTorch
-pseudoraw photo.jpg --invisp --invisp-camera NIKON_D700   # or Canon_EOS_5D
+openraw photo.jpg --invisp --invisp-camera NIKON_D700   # or Canon_EOS_5D
 ```
 
 Weights load from `pretrained/` relative to the current directory
@@ -29,7 +29,7 @@ through that camera's learned behavior.
 
 ## What's in the repo
 
-- **`pseudoraw/third_party/invisp/`** — InvISP's own source, vendored
+- **`openraw/third_party/invisp/`** — InvISP's own source, vendored
   (MIT): the `InvISPNet` architecture (affine coupling blocks with
   learnable invertible 1×1 convolutions) and its differentiable JPEG
   simulator. One line is patched: `torch.qr` → `torch.linalg.qr`, because
@@ -40,12 +40,12 @@ through that camera's learned behavior.
   same `torch.linalg` swap applies, for the same reason.
 - **`pretrained/canon.pth`, `pretrained/nikon.pth`** — upstream's official
   checkpoints, verified byte-identical (md5) to upstream.
-- **`pseudoraw/invisp_bridge.py`** — our own glue code. The subtle part:
+- **`openraw/invisp_bridge.py`** — our own glue code. The subtle part:
   the checkpoints were trained with upstream's `--gamma` flag, so the
   network's "RAW" output is gamma-compressed, and the bridge undoes that
   before handing linear data to the shared `bitdepth.py`/`dng_writer.py`
   stages.
-- **`pseudoraw/ml/`** — superseded: a from-scratch NumPy demo of the same
+- **`openraw/ml/`** — superseded: a from-scratch NumPy demo of the same
   architecture class written before the real source was available. Kept
   only for its exact-invertibility tests; don't build on it.
 

@@ -20,11 +20,11 @@ import tifffile
 from PIL import Image
 from PIL.ExifTags import Base, IFD
 
-from pseudoraw.decode import load_jpeg
-from pseudoraw.exif_transfer import extract_exif, build_dng_extratags
-from pseudoraw.chroma import refine_chroma
-from pseudoraw.dng_writer import write_linear_dng
-from pseudoraw import PseudoRawPipeline, PipelineConfig
+from openraw.decode import load_jpeg
+from openraw.exif_transfer import extract_exif, build_dng_extratags
+from openraw.chroma import refine_chroma
+from openraw.dng_writer import write_linear_dng
+from openraw import OpenRawPipeline, PipelineConfig
 
 from .helpers import main_page, main_array, ifd0_tags, decoded_linear
 
@@ -112,7 +112,7 @@ def test_dng_write_carries_real_make_model_overriding_placeholder(tmp_path):
         assert tags[272].value == "X-T4"
         # UniqueCameraModel always stays the synthetic-sensor label
         # regardless of real Make/Model being present.
-        assert tags[50708].value == "pseudoraw virtual sensor"
+        assert tags[50708].value == "OpenRAW virtual sensor"
         fnum_num, fnum_den = tags[33437].value  # RATIONAL tags read back as a raw (num, den) tuple
         assert fnum_num / fnum_den == pytest.approx(2.8, abs=0.01)
 
@@ -157,8 +157,8 @@ def test_dng_write_without_exif_fields_keeps_placeholder(tmp_path):
 
     with tifffile.TiffFile(out) as tf:
         tags = ifd0_tags(tf)
-        assert tags[271].value == "pseudoraw"
-        assert tags[272].value == "pseudoraw-poc"
+        assert tags[271].value == "OpenRAW"
+        assert tags[272].value == "OpenRAW"
         assert 33437 not in tags  # no fabricated FNumber
 
 
@@ -263,7 +263,7 @@ def test_ljpeg_decodes_correctly_in_real_libraw(tmp_path, bit_depth, max_err_ste
     SDK but libraw scrambled pixels inside every tile -- this test pins the
     layout that works in BOTH.
     """
-    from pseudoraw.tonecurve import linear_to_srgb, srgb_to_linear
+    from openraw.tonecurve import linear_to_srgb, srgb_to_linear
     rng = np.random.default_rng(0)
     # photo-like: smooth gradients + texture, 3 channels, not pure noise
     yy, xx = np.mgrid[0:300, 0:400]
@@ -326,7 +326,7 @@ def test_full_pipeline_end_to_end_with_exif_and_444_jpeg(tmp_path):
     _make_jpeg_with_exif(p, subsampling=0)
     out = str(tmp_path / "out.dng")
 
-    pipeline = PseudoRawPipeline()
+    pipeline = OpenRawPipeline()
     result = pipeline.run_to_dng(p, out)
 
     assert result.decoded.is_chroma_subsampled is False
@@ -354,7 +354,7 @@ def test_dither_amplitude_lower_in_detailed_regions():
     """A flat half and a noisy/detailed half of the same image should
     receive visibly different dither amounts -- the detailed half closer
     to its un-dithered value than the flat half is to its own."""
-    from pseudoraw.bitdepth import expand_to_16bit
+    from openraw.bitdepth import expand_to_16bit
 
     h, w = 64, 64
     linear = np.zeros((h, w, 3), dtype=np.float32)
@@ -385,8 +385,8 @@ def test_deband_never_changes_pixels_by_more_than_one_quantization_step():
     quantization step, so on detailed content, deband-only output must
     round-trip back to within +/-1 sRGB level of the source, everywhere.
     """
-    from pseudoraw.bitdepth import expand_to_16bit
-    from pseudoraw.tonecurve import srgb_to_linear, linear_to_srgb
+    from openraw.bitdepth import expand_to_16bit
+    from openraw.tonecurve import srgb_to_linear, linear_to_srgb
 
     rng = np.random.default_rng(0)
     # Low-contrast fine texture across the tonal range -- the kind of
@@ -425,7 +425,7 @@ def test_dng_identity_tags_live_in_ifd0(tmp_path, write_preview):
 
 def _dng_validate_bin():
     import os, shutil
-    p = os.environ.get("PSEUDORAW_DNG_VALIDATE") or shutil.which("dng_validate")
+    p = os.environ.get("OPENRAW_DNG_VALIDATE") or shutil.which("dng_validate")
     return p if p and os.path.exists(p) else None
 
 
@@ -469,3 +469,15 @@ def test_main_ifd_has_exactly_the_tags_we_intend(tmp_path, write_preview, compre
     from .helpers import decoded_linear
     if bit_depth == 16:
         assert np.array_equal(decoded_linear(out), rgb16)
+
+
+@pytest.mark.parametrize("src", ["/home/alice/Pictures/trip/IMG_1.jpg", r"C:\Users\alice\Pictures\IMG_1.jpg"])
+def test_dng_never_embeds_the_source_folder_path(tmp_path, src):
+    """Privacy: ImageDescription used to embed the full source path, leaking
+    the user's account name and folder layout into every shared DNG."""
+    rgb16 = (np.random.default_rng(0).random((16, 16, 3)) * 65535).astype(np.uint16)
+    out = str(tmp_path / "out.dng")
+    write_linear_dng(out, rgb16, source_jpeg_path=src)
+    blob = open(out, "rb").read()
+    assert b"alice" not in blob and b"Pictures" not in blob
+    assert b"IMG_1.jpg" in blob  # the filename itself is fine and useful

@@ -18,8 +18,8 @@ import pytest
 import tifffile
 from PIL import Image
 
-from pseudoraw import PseudoRawPipeline, PipelineConfig
-from pseudoraw.tonecurve import srgb_to_linear, linear_to_srgb
+from openraw import OpenRawPipeline, PipelineConfig
+from openraw.tonecurve import srgb_to_linear, linear_to_srgb
 from .helpers import main_page, main_array
 
 
@@ -43,7 +43,7 @@ def jpeg_path(tmp_path):
 
 def test_pipeline_runs_and_writes_valid_dng(jpeg_path, tmp_path):
     out = str(tmp_path / "out.dng")
-    pipeline = PseudoRawPipeline()
+    pipeline = OpenRawPipeline()
     result = pipeline.run_to_dng(jpeg_path, out)
 
     assert os.path.exists(out)
@@ -60,7 +60,7 @@ def test_saturated_patches_keep_their_hue(jpeg_path, tmp_path):
     data into cv2's YCrCb conversion, which expects 0-1 for float32 and
     silently desaturated everything. This checks hue identity survives."""
     out = str(tmp_path / "out.dng")
-    pipeline = PseudoRawPipeline()
+    pipeline = OpenRawPipeline()
     pipeline.run_to_dng(jpeg_path, out)
 
     arr = main_array(out).astype(np.float32) / 65535.0
@@ -81,10 +81,10 @@ def test_bitdepth_expansion_increases_tonal_resolution(jpeg_path, tmp_path):
     structure (this just confirms the mechanism engages, not image
     quality, which isn't something a unit test can judge)."""
     out = str(tmp_path / "out.dng")
-    pipeline = PseudoRawPipeline()
+    pipeline = OpenRawPipeline()
     pipeline.run_to_dng(jpeg_path, out)
 
-    from pseudoraw.decode import load_jpeg
+    from openraw.decode import load_jpeg
 
     d = load_jpeg(jpeg_path)
     row_u8 = (d.rgb[100, :, 0] * 255).astype(np.uint8)
@@ -105,11 +105,11 @@ def test_dng_default_is_ljpeg_and_much_smaller_than_uncompressed(jpeg_path, tmp_
     meaningfully smaller than uncompressed, 16-bit LJPEG is bit-exact, and
     the 12-bit default stays within a small fraction of a source step.
     """
-    from pseudoraw.dng_writer import write_linear_dng
-    from pseudoraw.tonecurve import linear_to_srgb
+    from openraw.dng_writer import write_linear_dng
+    from openraw.tonecurve import linear_to_srgb
     from .helpers import decoded_linear
 
-    rgb16 = PseudoRawPipeline().run(jpeg_path).rgb16
+    rgb16 = OpenRawPipeline().run(jpeg_path).rgb16
     none_p, l16_p, dflt_p = (str(tmp_path / n) for n in ("none.dng", "l16.dng", "default.dng"))
     write_linear_dng(none_p, rgb16, compression="none")
     write_linear_dng(l16_p, rgb16, compression="ljpeg", bit_depth=16)
@@ -130,7 +130,7 @@ def test_tonecurve_roundtrip_is_near_exact():
 def test_experimental_flags_do_not_crash(jpeg_path, tmp_path):
     out = str(tmp_path / "out.dng")
     config = PipelineConfig(generic_s_curve_strength=0.3, experimental_gamut_widen=0.4)
-    pipeline = PseudoRawPipeline(config)
+    pipeline = OpenRawPipeline(config)
     pipeline.run_to_dng(jpeg_path, out)
     assert os.path.exists(out)
 
@@ -157,7 +157,7 @@ def test_invisp_path_fails_with_clear_actionable_error_without_torch(jpeg_path, 
     installed (see the paired test below for that case)."""
     out = str(tmp_path / "out.dng")
     config = PipelineConfig(use_invisp=True, invisp_camera="NIKON_D700")
-    pipeline = PseudoRawPipeline(config)
+    pipeline = OpenRawPipeline(config)
     with pytest.raises(ImportError, match="PyTorch"):
         pipeline.run_to_dng(jpeg_path, out)
 
@@ -178,7 +178,7 @@ def test_invisp_path_runs_real_network_and_writes_valid_dng(jpeg_path, tmp_path)
 
     out = str(tmp_path / "out.dng")
     config = PipelineConfig(use_invisp=True, invisp_camera="NIKON_D700")
-    pipeline = PseudoRawPipeline(config)
+    pipeline = OpenRawPipeline(config)
     result = pipeline.run_to_dng(jpeg_path, out)
 
     assert os.path.exists(out)

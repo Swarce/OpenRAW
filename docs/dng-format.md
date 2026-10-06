@@ -1,6 +1,6 @@
 # DNG format notes
 
-How `pseudoraw/dng_writer.py` writes files, why each choice was made, and —
+How `openraw/dng_writer.py` writes files, why each choice was made, and —
 most importantly for contributors — **how to test changes**, because every
 real bug this writer has had passed a lenient reader first.
 
@@ -24,7 +24,7 @@ With `--no-preview`, everything lives in a single IFD0.
 attached to the main image and moved into the SubIFD; libraw still opened
 the file (it scans every IFD), but Skia and Luminar rejected it.
 
-`UniqueCameraModel` is always `pseudoraw virtual sensor`, even when the real
+`UniqueCameraModel` is always `OpenRAW virtual sensor`, even when the real
 Make/Model is copied from EXIF, so no reader mistakes the data for that
 camera's sensor output.
 
@@ -88,7 +88,7 @@ passes the strict one.**
 
    ```bash
    tools/build_dng_validate.sh          # Linux/macOS: g++ and zlib
-   export PSEUDORAW_DNG_VALIDATE=$PWD/.dng_validate_build/dng_validate
+   export OPENRAW_DNG_VALIDATE=$PWD/.dng_validate_build/dng_validate
    python -m pytest                     # Adobe tests now run instead of skipping
    ```
 

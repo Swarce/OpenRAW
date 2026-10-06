@@ -8,18 +8,18 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import lr_scheduler
 
-# PATCHED (pseudoraw, not upstream) import paths: upstream's repo has
+# PATCHED (OpenRAW, not upstream) import paths: upstream's repo has
 # model/ and utils/ as top-level packages sitting next to this file; in
-# pseudoraw they live under pseudoraw/third_party/invisp/ instead (see /NOTICE.md).
+# openraw they live under openraw/third_party/invisp/ instead (see /NOTICE.md).
 # dataset/ and config/ ARE top-level here, matching upstream, so those
 # two imports are unchanged.
-from pseudoraw.third_party.invisp.model.model import InvISPNet
+from openraw.third_party.invisp.model.model import InvISPNet
 from dataset.FiveK_dataset import FiveKDatasetTrain
 from config.config import get_arguments
 
-from pseudoraw.third_party.invisp.utils.JPEG import DiffJPEG
+from openraw.third_party.invisp.utils.JPEG import DiffJPEG
 
-# PATCHED (pseudoraw, not upstream): the original here was
+# PATCHED (OpenRAW, not upstream): the original here was
 #   os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
 #   os.environ['CUDA_VISIBLE_DEVICES'] = str(np.argmax([...]))
 #   os.system('rm tmp')
