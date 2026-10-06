@@ -67,9 +67,11 @@ jobs:
           OPENRAW_DNG_VALIDATE: ${{ github.workspace }}/.dng_validate_build/dng_validate
         run: |
           python -m pytest -q
-          # every Adobe test must have RUN, not silently skipped
+          # every Adobe test must have RUN, not silently skipped. Match the Adobe
+          # tests' own skip reason: other modules' skips (e.g. torch-only tests,
+          # reported even when deselected) must not fail this job.
           python -m pytest -q -k adobe_dng_validate -rs | tee adobe.txt
-          ! grep -q "SKIPPED" adobe.txt
+          ! grep -q "dng_validate not available" adobe.txt
 
   package:
     # Build the wheel and install it into a CLEAN venv with a fresh dependency
