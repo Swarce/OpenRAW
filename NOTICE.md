@@ -130,3 +130,11 @@ When/if training data is added to this project, it should come from
 existing paired RAW/JPEG research datasets with their own usage terms
 (e.g. MIT-Adobe FiveK, NUS, RAISE — the same datasets InvISP itself
 trains on), not scraped web images.
+
+## Logo font: Archivo (SIL Open Font License 1.1)
+
+The wordmark in `assets/logo/` is set in **Archivo**, Copyright 2020 The Archivo Project Authors
+(https://github.com/Omnibus-Type/Archivo),
+converted to outlines by `tools/logo/make_logo.py`. The font file and its
+license are included at `tools/logo/fonts/` (`OFL.txt`). The aperture
+artwork is original, constructed geometrically by the same script.

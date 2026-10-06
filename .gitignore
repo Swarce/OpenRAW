@@ -8,3 +8,4 @@ examples/*.png
 build/
 dist/
 *.egg-info/
+tools/logo/.inst_*.ttf

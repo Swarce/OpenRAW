@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/openraw-a-classic-dark.svg">
+    <img src="assets/logo/openraw-a-classic-light.svg" alt="OpenRAW" width="420">
+  </picture>
+</p>
+
 # OpenRAW
 
 **Turn JPEGs into editable linear DNGs** — more room to push exposure,
