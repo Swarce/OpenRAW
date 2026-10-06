@@ -45,8 +45,15 @@ if __name__ == "__main__":
     if args.list_cameras:
         _fp.list_cameras(args.data_path)
         raise SystemExit(0)
-    _queries = [q.strip() for c in (args.camera or ["NIKON_D700"]) for q in c.split(",") if q.strip()]
-    args.camera = _fp.prepare_cameras(_queries, args.data_path, download=args.download, jobs=args.download_jobs)
+    _queries = [q.strip() for c in (args.camera or []) for q in c.split(",") if q.strip()]
+    if args.all_downloaded:
+        _found = _fp.downloaded_cameras(args.data_path)
+        if not _found:
+            raise SystemExit(f"[data] --all-downloaded: no camera folders with DNGs under {args.data_path}fivek/raw/")
+        print(f"[data] found {len(_found)} downloaded camera(s): " + ", ".join(_found))
+        _queries += [c for c in _found if c not in _queries]
+    args.camera = _fp.prepare_cameras(_queries or ["NIKON_D700"], args.data_path, download=args.download,
+                                      jobs=args.download_jobs, use_available=args.all_downloaded)
     if args.prepare_only:
         print("[data] prepared:", ", ".join(args.camera))
         raise SystemExit(0)

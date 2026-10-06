@@ -3,7 +3,9 @@ Per-camera MIT-Adobe FiveK preparation for InvISP training: download only the
 DNGs a camera needs, turn them into (RAW .npz, RGB .jpg) training pairs, and
 write train/test lists -- in the exact layout dataset/FiveK_dataset.py reads:
 
-    <data_root>/<CameraDir>/DNG/<name>.dng     downloaded originals
+    <data_root>/fivek/raw/<Make_Model>/<name>.dng   downloaded originals -- the same
+                                                    layout fivek_download.py uses
+                                                    with --out <data_root>/fivek
     <data_root>/<CameraDir>/RAW/<name>.npz     demosaiced linear raw + metadata
     <data_root>/<CameraDir>/RGB/<name>.jpg     rendered target
     <data_root>/<CameraDir>_train.txt / _test.txt
@@ -50,7 +52,33 @@ JPEG_QUALITY = 90  # same as upstream
 
 
 def camera_dir_name(label: str) -> str:
+    """Folder for preprocessed pairs + split lists (what the loader calls a camera)."""
     return LEGACY_DIRS.get(fk.norm(label)) or fk.folder_name(*label.split(" ", 1))
+
+
+def raw_dir(data_root: Path, label: str) -> Path:
+    """Where a camera's DNGs live: fivek_download.py's layout, e.g.
+    data/fivek/raw/Canon_EOS_10D/ (with --out data/fivek)."""
+    return Path(data_root) / "fivek" / "raw" / fk.folder_name(*label.split(" ", 1))
+
+
+def downloaded_cameras(data_root="./data/", log=print) -> list[str]:
+    """FiveK camera labels for every data/fivek/raw/<Make_Model>/ folder that
+    holds at least one DNG. Folders that match no FiveK camera are reported."""
+    root = Path(data_root) / "fivek" / "raw"
+    if not root.is_dir():
+        return []
+    items = fk.load_metadata(Path(data_root) / "fivek" / "_metadata", list(fk.SPLIT_FILES))
+    by_folder = {fk.folder_name(*label.split(" ", 1)): label for label in fk.build_camera_index(items)}
+    found = []
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        if not any(d.glob("*.dng")):
+            continue
+        if d.name in by_folder:
+            found.append(by_folder[d.name])
+        else:
+            log(f"[data] skipping {d}: folder name matches no FiveK camera")
+    return found
 
 
 # --------------------------------------------------------------------------- #
@@ -129,9 +157,12 @@ def _write_split_lists(data_root: Path, cam_dir: str, names, items, legacy: bool
 
 
 def prepare_cameras(queries, data_root="./data/", download=False, jobs=4, workers=None,
-                    limit=0, contains=False, log=print) -> list[str]:
+                    limit=0, contains=False, log=print, use_available=False) -> list[str]:
     """Make the given cameras trainable. Returns their folder names (what the
-    dataset loader expects as camera names)."""
+    dataset loader expects as camera names).
+
+    use_available: train on whatever DNGs are already downloaded instead of
+    stopping when some are missing (used by --all-downloaded)."""
     data_root = Path(data_root)
     items = fk.load_metadata(data_root / "fivek" / "_metadata", list(fk.SPLIT_FILES))
     index = fk.build_camera_index(items)
@@ -151,13 +182,20 @@ def prepare_cameras(queries, data_root="./data/", download=False, jobs=4, worker
             names = names[:limit]
         log(f"[data] {label} -> {cam_dir}/ ({len(names)} images)")
 
-        dngs = {n: base / "DNG" / f"{n}.dng" for n in names}
+        rdir, old_dir = raw_dir(data_root, label), base / "DNG"
+        # fivek_download.py's layout; DNGs left in the older <CameraDir>/DNG/ still count
+        dngs = {n: (old_dir / f"{n}.dng") if (old_dir / f"{n}.dng").exists() else (rdir / f"{n}.dng") for n in names}
         done = {n for n in names if (base / "RAW" / f"{n}.npz").exists() and (base / "RGB" / f"{n}.jpg").exists()}
         # a finished pair counts as present even if its DNG was deleted to save space
         missing = [n for n, p in dngs.items() if n not in done and not (p.exists() and p.stat().st_size > 0)]
         if missing and not download:
-            raise SystemExit(f"[data] {label}: {len(missing)} of {len(names)} DNGs missing in {base / 'DNG'}. "
-                             f"Re-run with --download, or place them there.")
+            if use_available:
+                log(f"[data]   {len(missing)} of {len(names)} not downloaded -- training on the {len(names) - len(missing)} present")
+                names = [n for n in names if n not in missing]
+                missing = []
+            else:
+                raise SystemExit(f"[data] {label}: {len(missing)} of {len(names)} DNGs missing in {rdir}. "
+                                 f"Re-run with --download, or place them there.")
         if missing:
             log(f"[data]   downloading {len(missing)} DNG(s) ...")
             fails = []
@@ -210,6 +248,7 @@ if __name__ == "__main__":
     ap.add_argument("-c", "--camera", action="append", default=[], help="FiveK camera, e.g. 'Nikon D70' (repeatable/comma)")
     ap.add_argument("--list", action="store_true", help="list cameras and exit")
     ap.add_argument("--download", action="store_true", help="download missing DNGs")
+    ap.add_argument("--all-downloaded", action="store_true", help="every camera found in data/fivek/raw/, using what's there")
     ap.add_argument("--contains", action="store_true", help="substring camera matching")
     ap.add_argument("--data-path", default="./data/")
     ap.add_argument("-j", "--jobs", type=int, default=4, help="parallel downloads")
@@ -220,6 +259,9 @@ if __name__ == "__main__":
         list_cameras(a.data_path)
         sys.exit(0)
     qs = [q.strip() for c in a.camera for q in c.split(",") if q.strip()]
+    if a.all_downloaded:
+        qs += [c for c in downloaded_cameras(a.data_path) if c not in qs]
     if not qs:
-        ap.error("give at least one --camera (or --list)")
-    prepare_cameras(qs, a.data_path, a.download, a.jobs, a.workers or None, a.limit, a.contains)
+        ap.error("give at least one --camera, --all-downloaded, or --list")
+    prepare_cameras(qs, a.data_path, a.download, a.jobs, a.workers or None, a.limit, a.contains,
+                    use_available=a.all_downloaded)

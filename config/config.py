@@ -21,6 +21,8 @@ def get_arguments():
                         help="FiveK camera(s) to train on, e.g. 'Nikon D700' (repeatable). Default: NIKON_D700.")
     parser.add_argument("--list-cameras", dest="list_cameras", action="store_true",
                         help="list FiveK cameras with image counts and exit")
+    parser.add_argument("--all-downloaded", dest="all_downloaded", action="store_true",
+                        help="train on every camera found in data/fivek/raw/, using whatever is downloaded")
     parser.add_argument("--download", action="store_true",
                         help="download any missing DNGs for the chosen camera(s) before training")
     parser.add_argument("--prepare-only", dest="prepare_only", action="store_true",

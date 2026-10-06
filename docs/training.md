@@ -17,7 +17,15 @@ python train.py --task d70 --camera "Nikon D70" --download --gamma --aug
 DNGs from MIT's server, preprocesses them into training pairs, writes the
 train/test lists, then trains. Re-running skips everything already done.
 
-- **Several cameras**: repeat `--camera` (or use commas) to pool them into
+- **Everything you've downloaded**: `--all-downloaded` scans
+  `data/fivek/raw/`, maps each `<Make_Model>` folder back to its FiveK
+  camera, and pools all of them into one model, using whatever DNGs are
+  present (partly downloaded cameras train on what's there):
+
+  ```bash
+  python train.py --task all_cameras --all-downloaded --gamma --aug
+  ```
+- **Several specific cameras**: repeat `--camera` (or use commas) to pool them into
   one model — e.g. `--camera "Nikon D700" --camera "Canon EOS 5D"`. A
   multi-camera model is arguably the more useful one for OpenRAW, since a
   JPEG's source camera is often unknown.
@@ -34,12 +42,18 @@ optionally expert TIFFs) and `data/fivek_prepare.py --camera ... --download`.
 ## Data layout
 
 ```
-data/<CameraDir>/DNG/<name>.dng       downloaded originals (deletable after preprocessing)
+data/fivek/raw/<Make_Model>/<name>.dng   downloaded originals, e.g. data/fivek/raw/Canon_EOS_10D/
+                                         (fivek_download.py's layout with --out data/fivek;
+                                         deletable after preprocessing)
 data/<CameraDir>/RAW/<name>.npz       demosaiced linear raw + white balance + levels
 data/<CameraDir>/RGB/<name>.jpg       rendered training target
 data/<CameraDir>_train.txt, _test.txt
 data/fivek/_metadata/*.json           FiveK camera/split metadata (cached)
 ```
+
+DNGs left in the older `data/<CameraDir>/DNG/` location are still found.
+If a split list names images that were never prepared, the loader skips
+them and reports how many.
 
 Splits: InvISP's two cameras (Nikon D700 → `NIKON_D700`, Canon EOS 5D →
 `Canon_EOS_5D`) keep InvISP's published lists, so results stay comparable

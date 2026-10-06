@@ -94,8 +94,8 @@ def test_prepare_downloads_only_whats_missing_and_writes_official_split(fivek_se
     cams = fp.prepare_cameras(["Testco T1"], str(data_root) + "/", download=True, jobs=2, workers=1, log=lambda *_: None)
     assert cams == ["Testco_T1"]
     base = data_root / "Testco_T1"
-    for n in names:
-        assert (base / "DNG" / f"{n}.dng").exists()
+    for n in names:  # DNGs land in fivek_download.py's layout
+        assert (data_root / "fivek" / "raw" / "Testco_T1" / f"{n}.dng").exists()
         assert (base / "RAW" / f"{n}.npz").exists() and (base / "RGB" / f"{n}.jpg").exists()
     # FiveK official split: train + val -> train, test -> test
     assert (data_root / "Testco_T1_train.txt").read_text().split() == ["a0001-x", "a0002-y"]
@@ -115,7 +115,7 @@ def test_prepare_without_download_flag_reports_missing_files(fivek_server):
 def test_finished_pairs_count_even_if_dngs_were_deleted(fivek_server):
     data_root, names = fivek_server
     fp.prepare_cameras(["Testco T1"], str(data_root) + "/", download=True, workers=1, log=lambda *_: None)
-    for d in (data_root / "Testco_T1" / "DNG").glob("*.dng"):
+    for d in (data_root / "fivek" / "raw" / "Testco_T1").glob("*.dng"):
         d.unlink()  # user freed disk space after preprocessing
     fp.prepare_cameras(["Testco T1"], str(data_root) + "/", download=False, workers=1, log=lambda *_: None)
 
@@ -144,3 +144,48 @@ def test_loader_pools_cameras_normalizes_per_image_and_trains_one_step(fivek_ser
     loss = (rgb - s["target_rgb"][None]).abs().mean() + (net(rgb, rev=True) - x).abs().mean()
     loss.backward(); opt_.step()
     assert torch.isfinite(loss)
+
+
+def _copy_from_server(data_root, names, dest):
+    dest.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (dest / f"{n}.dng").write_bytes((data_root.parent / "server" / "dng" / f"{n}.dng").read_bytes())
+
+
+def test_all_downloaded_detects_camera_folders_and_uses_whats_there(fivek_server):
+    """--all-downloaded: scan data/fivek/raw/<Make_Model>/ (fivek_download.py's
+    layout), map folders back to FiveK cameras, train on what's present."""
+    data_root, names = fivek_server
+    raw = data_root / "fivek" / "raw"
+    _copy_from_server(data_root, ["a0001-x", "a0003-z"], raw / "Testco_T1")  # 2 of 3 downloaded
+    _copy_from_server(data_root, ["a0002-y"], raw / "Not_A_Camera")          # stray folder
+    (raw / "Empty_Folder").mkdir()
+    logs = []
+    assert fp.downloaded_cameras(str(data_root) + "/", log=logs.append) == ["Testco T1"]
+    assert any("Not_A_Camera" in l for l in logs)
+    cams = fp.prepare_cameras(["Testco T1"], str(data_root) + "/", download=False, workers=1,
+                              log=lambda *_: None, use_available=True)
+    assert cams == ["Testco_T1"]
+    assert (data_root / "Testco_T1_train.txt").read_text().split() == ["a0001-x"]
+    assert (data_root / "Testco_T1_test.txt").read_text().split() == ["a0003-z"]
+    assert not _Quiet.hits  # nothing downloaded
+
+
+def test_dngs_in_the_old_location_still_count(fivek_server):
+    data_root, names = fivek_server
+    _copy_from_server(data_root, list(names), data_root / "Testco_T1" / "DNG")
+    fp.prepare_cameras(["Testco T1"], str(data_root) + "/", download=False, workers=1, log=lambda *_: None)
+    assert len(list((data_root / "Testco_T1" / "RAW").glob("*.npz"))) == 3
+    assert not _Quiet.hits
+
+
+def test_loader_skips_listed_images_that_arent_prepared(fivek_server):
+    pytest.importorskip("torch")
+    data_root, _ = fivek_server
+    cams = fp.prepare_cameras(["Testco T1"], str(data_root) + "/", download=True, workers=1, log=lambda *_: None)
+    with open(data_root / "Testco_T1_train.txt", "a") as f:  # e.g. a published list, partially downloaded
+        f.write("a9999-never-downloaded\n")
+    sys.path.insert(0, str(ROOT))
+    from dataset.FiveK_dataset import FiveKDatasetTrain
+    ds = FiveKDatasetTrain(SimpleNamespace(debug_mode=False, data_path=str(data_root) + "/", camera=cams, gamma=True))
+    assert len(ds) == 2

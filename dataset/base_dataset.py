@@ -1,4 +1,5 @@
 from __future__ import print_function, division
+import os
 import numpy as np
 from torch.utils.data import Dataset
 import torch
@@ -66,10 +67,19 @@ class BaseDataset(Dataset):
                 valid_camera_list = [line.strip() for line in f_read.readlines() if line.strip()]
             if self.debug_mode:
                 valid_camera_list = valid_camera_list[:10]
+            skipped = 0
             for name in valid_camera_list:
                 full_name = data_path + cam
-                input_RAWs_WBs.append(full_name + "/RAW/" + name + ".npz")
-                target_RGBs.append(full_name + "/RGB/" + name + ".jpg")
+                raw_p, rgb_p = full_name + "/RAW/" + name + ".npz", full_name + "/RGB/" + name + ".jpg"
+                # skip listed images that were never prepared (partial downloads
+                # with a published split list) instead of crashing mid-epoch
+                if not (os.path.exists(raw_p) and os.path.exists(rgb_p)):
+                    skipped += 1
+                    continue
+                input_RAWs_WBs.append(raw_p)
+                target_RGBs.append(rgb_p)
+            if skipped:
+                print(f"[data] {cam}: skipped {skipped} listed image(s) that aren't prepared")
 
         return input_RAWs_WBs, target_RGBs 
 
