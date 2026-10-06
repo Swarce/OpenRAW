@@ -24,7 +24,7 @@ from pseudoraw.chroma import refine_chroma
 from pseudoraw.dng_writer import write_linear_dng
 from pseudoraw import PseudoRawPipeline, PipelineConfig
 
-from .helpers import main_page, main_array
+from .helpers import main_page, main_array, ifd0_tags
 
 try:
     import rawpy
@@ -105,7 +105,7 @@ def test_dng_write_carries_real_make_model_overriding_placeholder(tmp_path):
     write_linear_dng(out, rgb16, exif_fields=fields)
 
     with tifffile.TiffFile(out) as tf:
-        tags = main_page(tf).tags
+        tags = ifd0_tags(tf)  # identity/EXIF tags live in IFD0 per DNG spec
         assert tags[271].value == "FUJIFILM"
         assert tags[272].value == "X-T4"
         # UniqueCameraModel always stays the synthetic-sensor label
@@ -153,7 +153,7 @@ def test_dng_write_without_exif_fields_keeps_placeholder(tmp_path):
     write_linear_dng(out, rgb16, exif_fields=None)
 
     with tifffile.TiffFile(out) as tf:
-        tags = main_page(tf).tags
+        tags = ifd0_tags(tf)
         assert tags[271].value == "pseudoraw"
         assert tags[272].value == "pseudoraw-poc"
         assert 33437 not in tags  # no fabricated FNumber
@@ -295,7 +295,7 @@ def test_full_pipeline_end_to_end_with_exif_and_444_jpeg(tmp_path):
 
     assert result.decoded.is_chroma_subsampled is False
     with tifffile.TiffFile(out) as tf:
-        assert main_page(tf).tags[271].value == "FUJIFILM"
+        assert ifd0_tags(tf)[271].value == "FUJIFILM"
 
 
 # ---- chroma.py: 4:4:4 short-circuit ----
@@ -363,3 +363,47 @@ def test_deband_never_changes_pixels_by_more_than_one_quantization_step():
     out = expand_to_16bit(lin, src8, dither=False, deband=True)
     back8 = (linear_to_srgb(out.astype(np.float32) / 65535.0) * 255 + 0.5).astype(np.uint8)
     assert np.abs(back8.astype(int) - src8.astype(int)).max() <= 1
+
+
+@pytest.mark.parametrize("write_preview", [True, False])
+def test_dng_identity_tags_live_in_ifd0(tmp_path, write_preview):
+    """
+    Regression test for a real bug: Android's Skia ("image format may not
+    be supported") and Luminar refused output files. Adobe's dng_validate:
+    "Missing DNGVersion". Adding the preview IFD had moved DNGVersion,
+    UniqueCameraModel, ColorMatrix1 etc. into the raw SubIFD; readers built
+    on Adobe's DNG SDK look for them in IFD0. libraw scans all IFDs, so it
+    still opened the file -- which is why libraw-only testing missed this.
+    """
+    rgb16 = (np.random.default_rng(0).random((64, 64, 3)) * 65535).astype(np.uint16)
+    out = str(tmp_path / "out.dng")
+    write_linear_dng(out, rgb16, write_preview=write_preview)
+
+    with tifffile.TiffFile(out) as tf:
+        ifd0 = tf.pages[0].tags
+        for code in (50706, 50707, 50708, 50721, 50778, 50728, 271, 272, 274):
+            assert code in ifd0, f"tag {code} missing from IFD0"
+        raw = main_page(tf).tags
+        assert 50714 in raw and 50717 in raw  # BlackLevel/WhiteLevel on the raw IFD
+
+
+def _dng_validate_bin():
+    import os, shutil
+    p = os.environ.get("PSEUDORAW_DNG_VALIDATE") or shutil.which("dng_validate")
+    return p if p and os.path.exists(p) else None
+
+
+@pytest.mark.skipif(_dng_validate_bin() is None,
+                    reason="Adobe dng_validate not available (build: tools/build_dng_validate.sh)")
+@pytest.mark.parametrize("write_preview", [True, False])
+def test_dng_passes_adobe_dng_validate(tmp_path, write_preview):
+    """Strictest check available: Adobe's own reference validator must
+    report no errors AND no warnings, for both layouts."""
+    import subprocess
+    rgb16 = (np.random.default_rng(0).random((128, 128, 3)) * 65535).astype(np.uint16)
+    out = str(tmp_path / "out.dng")
+    write_linear_dng(out, rgb16, write_preview=write_preview)
+    r = subprocess.run([_dng_validate_bin(), out], capture_output=True, text=True)
+    text = r.stdout + r.stderr
+    assert "*** Error" not in text and "*** Warning" not in text, text
+    assert "Validation complete" in text

@@ -238,11 +238,30 @@ def write_linear_dng(
         50730: (50730, "2i", 1, _rational_flat(0.0), False),
     }
 
+    # Orientation: TIFF/DNG structural default 1 ("stored as-is") when the
+    # source has none -- not invented camera metadata, just the spec's
+    # default made explicit (Adobe's dng_validate warns when it's absent).
+    # A real source Orientation overrides it below.
+    tags[274] = (274, "H", 1, 1, False)
+
     if exif_fields:
         for tag in build_dng_extratags(exif_fields):
             tags[tag[0]] = tag  # real value overrides any placeholder above
 
-    extratags = list(tags.values())
+    # Split per the DNG spec: raw-data tags belong to the raw image's own
+    # IFD; EVERYTHING else (DNGVersion, UniqueCameraModel, ColorMatrix1,
+    # AsShotNeutral, Make/Model/Orientation, EXIF...) belongs in IFD0,
+    # whatever IFD0 happens to be. Readers built on Adobe's DNG SDK
+    # (Android's Skia, Luminar, and most commercial tools) identify a
+    # file as DNG by finding DNGVersion IN IFD0 -- a real bug shipped
+    # where adding the preview IFD moved all of these into the SubIFD
+    # with the main image, so IFD0 (the preview) had no DNGVersion.
+    # libraw scans every IFD and still opened it, which hid the bug;
+    # Adobe's own dng_validate reported "Missing DNGVersion".
+    RAW_IFD_TAGS = {50714, 50717}  # BlackLevel, WhiteLevel
+    raw_extratags = [t for c, t in tags.items() if c in RAW_IFD_TAGS]
+    ifd0_extratags = [t for c, t in tags.items() if c not in RAW_IFD_TAGS]
+    extratags = ifd0_extratags + raw_extratags  # single-IFD layout: all together
 
     main_kwargs = dict(
         photometric=DNG_PHOTOMETRIC_LINEAR_RAW,
@@ -294,6 +313,10 @@ def write_linear_dng(
         tifffile.imwrite(path, rgb16, **main_kwargs)
         return
 
+    # Preview layout: IFD0 (preview) carries the DNG/EXIF tags, the raw
+    # SubIFD carries only its raw-data tags -- see the split above.
+    main_kwargs["extratags"] = raw_extratags
+
     preview = _make_preview(rgb16, max_dim=preview_max_dim)
     preview_kwargs, preview_warning = _preview_write_kwargs(preview_quality)
     if preview_warning:
@@ -313,6 +336,7 @@ def write_linear_dng(
             subfiletype=1,  # reduced-resolution image
             subifds=1,  # reserve one SubIFD slot for the main image below
             description=f"pseudoraw preview ({preview.shape[1]}x{preview.shape[0]})",
+            extratags=ifd0_extratags,  # DNGVersion etc MUST be in IFD0 -- see above
             metadata=None,  # same as the main write -- without this, tifffile
             # tries to parse our custom description as its own auto-generated
             # shape-JSON metadata and warns "invalid shaped series metadata or

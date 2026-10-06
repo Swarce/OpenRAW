@@ -13,9 +13,17 @@ import tifffile
 def main_page(tf: tifffile.TiffFile):
     """The main (full-resolution LinearRaw) TiffPage, i.e. the SubIFD
     off of IFD0's preview -- NOT tf.pages[0], which is the preview."""
-    return tf.pages[0].pages[0]
+    p0 = tf.pages[0]
+    return p0.pages[0] if p0.pages else p0  # single-IFD layout: IFD0 IS the main image
 
 
 def main_array(path: str):
     """Pixel data of the main (full-resolution) image, not the preview."""
-    return tifffile.imread(path, series=1)
+    with tifffile.TiffFile(path) as tf:
+        return main_page(tf).asarray()
+
+
+def ifd0_tags(tf: tifffile.TiffFile):
+    """IFD0's tags -- where the DNG spec puts DNGVersion, Make/Model,
+    ColorMatrix1, EXIF etc. (NOT the raw SubIFD; see test_dng_identity_tags_live_in_ifd0)."""
+    return tf.pages[0].tags

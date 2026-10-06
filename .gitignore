@@ -4,3 +4,4 @@ __pycache__/
 examples/*.dng
 examples/*.png
 !examples/deblock_comparison.png
+.dng_validate_build/
