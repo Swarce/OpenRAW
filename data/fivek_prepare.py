@@ -37,6 +37,13 @@ import argparse
 import os
 import sys
 import multiprocessing as mp
+import warnings
+
+# colour-science (under colour-demosaicing) warns on import when matplotlib is
+# missing, because some of its PLOTTING features need it. We never plot, so
+# nothing is lost -- but it printed once per preprocessing worker. Silence
+# exactly that message; any other colour-science warning still shows.
+warnings.filterwarnings("ignore", message=r'.*"Matplotlib" related API features are not available')
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
