@@ -83,7 +83,14 @@ def expand_to_16bit(
 
     flat_mask = None
     if dither or deband:
-        gray = cv2.cvtColor((np.clip(linear_rgb, 0, 1) * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        # Flatness is judged on the ORIGINAL perceptual (sRGB-gamma) 8-bit
+        # pixels, not the linear image. Linear light crushes shadows and
+        # midtones toward zero, so judging flatness there made real
+        # midtone/shadow texture look "flat" and get smoothed away -- the
+        # main cause of a measured ~40% detail loss (Laplacian variance
+        # 40.3 -> 23.2) on a real user photo. sRGB is roughly perceptually
+        # uniform, which is what "would a human see banding here" needs.
+        gray = cv2.cvtColor(source_srgb_u8, cv2.COLOR_RGB2GRAY)
         grad = cv2.Laplacian(gray, cv2.CV_32F, ksize=3)
         grad_mag = np.abs(grad)
         flat_mask = np.clip(1.0 - grad_mag / 12.0, 0.0, 1.0)  # 1 = flat, 0 = edge/detail
@@ -108,7 +115,15 @@ def expand_to_16bit(
             smoothed[..., c] = cv2.bilateralFilter(
                 out[..., c].astype(np.float32), d=9, sigmaColor=0.02, sigmaSpace=9
             )
-        out = out * (1.0 - flat_mask * 0.85) + smoothed * (flat_mask * 0.85)
+        # Clamp the correction to at most ONE local 8-bit quantization step
+        # per pixel. Banding is, by definition, steps of that size -- so
+        # this lets deband smooth banding but makes it physically unable to
+        # remove any real detail larger than a quantization step. Previously
+        # the filter's change was unbounded, which is how it softened real
+        # texture (user report: "overall softness on the entire image").
+        step = _dither_amplitude(source_srgb_u8)
+        delta = np.clip(smoothed - out, -step, step)
+        out = out + delta * (flat_mask * 0.85)
 
     out = np.clip(out, 0.0, 1.0)
     return (out * 65535.0 + 0.5).astype(np.uint16)

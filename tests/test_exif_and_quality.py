@@ -337,3 +337,29 @@ def test_dither_amplitude_lower_in_detailed_regions():
     flat_diff = np.abs(out_a[:, :32].astype(np.int32) - out_b[:, :32].astype(np.int32)).mean()
     detailed_diff = np.abs(out_a[:, 32:].astype(np.int32) - out_b[:, 32:].astype(np.int32)).mean()
     assert flat_diff > detailed_diff
+
+
+def test_deband_never_changes_pixels_by_more_than_one_quantization_step():
+    """
+    Regression test for a real user report ("overall softness on the entire
+    image"): deband used to (a) judge flatness on the linear image, where
+    shadows/midtones look artificially flat, and (b) apply an unbounded
+    bilateral correction -- together they removed ~40% of measured detail
+    on a real photo. Now its correction is clamped to one local 8-bit
+    quantization step, so on detailed content, deband-only output must
+    round-trip back to within +/-1 sRGB level of the source, everywhere.
+    """
+    from pseudoraw.bitdepth import expand_to_16bit
+    from pseudoraw.tonecurve import srgb_to_linear, linear_to_srgb
+
+    rng = np.random.default_rng(0)
+    # Low-contrast fine texture across the tonal range -- the kind of
+    # content the old flatness mask misclassified as "flat".
+    base = np.tile(np.linspace(0.05, 0.9, 256), (256, 1))
+    tex = base + rng.normal(0, 0.012, (256, 256))
+    src8 = (np.clip(np.stack([tex] * 3, -1), 0, 1) * 255 + 0.5).astype(np.uint8)
+    lin = srgb_to_linear(src8.astype(np.float32) / 255.0)
+
+    out = expand_to_16bit(lin, src8, dither=False, deband=True)
+    back8 = (linear_to_srgb(out.astype(np.float32) / 65535.0) * 255 + 0.5).astype(np.uint8)
+    assert np.abs(back8.astype(int) - src8.astype(int)).max() <= 1
