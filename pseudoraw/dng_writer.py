@@ -62,6 +62,48 @@ def _make_preview(rgb16: np.ndarray, max_dim: int = 1024) -> np.ndarray:
     return (srgb * 255.0 + 0.5).astype(np.uint8)
 
 
+def _preview_write_kwargs(quality: int) -> tuple[dict, str | None]:
+    """
+    Decide the preview's compression BEFORE opening the output file at
+    all, by actually testing JPEG encoding on a throwaway array rather
+    than assuming it'll work. Returns (kwargs_for_tf.write, warning_or_None).
+
+    Why this exists: a real bug shipped where the preview always tried
+    JPEG compression (needs the imagecodecs package, which is NOT part
+    of tifffile's own built-in codecs -- unlike Deflate, which IS built
+    in), with no fallback. On any machine without imagecodecs already
+    installed for some unrelated reason, this crashed the ENTIRE
+    pipeline run -- not a degraded preview, a total failure, just to
+    produce a thumbnail. imagecodecs is now a real requirements.txt
+    dependency, but a missing optional-feeling C-extension package
+    souldn't be able to take down the whole tool: this checks up front
+    and falls back to an uncompressed preview (still small -- it's
+    already downscaled -- just bigger than a JPEG one) with a clear,
+    one-line warning instead.
+    """
+    try:
+        import imagecodecs  # noqa: F401
+
+        probe = np.zeros((8, 8, 3), dtype=np.uint8)
+        imagecodecs.jpeg8_encode(probe, level=90)
+        return (
+            dict(
+                photometric="rgb",
+                compression="jpeg",
+                compressionargs={"level": int(np.clip(quality, 1, 100))},
+            ),
+            None,
+        )
+    except Exception as e:
+        return (
+            dict(photometric="rgb", compression=None),
+            f"preview: JPEG compression unavailable ({type(e).__name__}: {e}) "
+            f"-- install 'imagecodecs' (see requirements.txt) for a smaller "
+            f"preview. Falling back to an uncompressed preview for now; the "
+            f"main image is unaffected.",
+        )
+
+
 def _float_matrix_to_srational(matrix: np.ndarray, denom: int = 1_000_000) -> list[int]:
     """Flat [num0, den0, num1, den1, ...] -- tifffile's extratags packer
     wants rational/srational values as a flat sequence of (count*2) ints,
@@ -253,19 +295,30 @@ def write_linear_dng(
         return
 
     preview = _make_preview(rgb16, max_dim=preview_max_dim)
+    preview_kwargs, preview_warning = _preview_write_kwargs(preview_quality)
+    if preview_warning:
+        print(f"[pseudoraw] {preview_warning}")
 
     # Standard DNG structure: IFD0 = small preview (what a basic viewer
     # or quick-look reads first), main full-res data in a SubIFD (tag
     # 330) off of it -- verified structurally with tifffile's own reader
     # and exiftool; see write_preview's docstring for why this exists.
+    # preview_kwargs' compression was decided up front (see
+    # _preview_write_kwargs) rather than discovered mid-write, so this
+    # TiffWriter session can't fail partway through from a missing codec
+    # and leave a half-written file behind.
     with tifffile.TiffWriter(path) as tf:
         tf.write(
             preview,
-            photometric="rgb",
-            compression="jpeg",
-            compressionargs={"level": int(np.clip(preview_quality, 1, 100))},
             subfiletype=1,  # reduced-resolution image
             subifds=1,  # reserve one SubIFD slot for the main image below
             description=f"pseudoraw preview ({preview.shape[1]}x{preview.shape[0]})",
+            metadata=None,  # same as the main write -- without this, tifffile
+            # tries to parse our custom description as its own auto-generated
+            # shape-JSON metadata and warns "invalid shaped series metadata or
+            # corrupted file" on read. Cosmetic (pixel data was never affected,
+            # confirmed both with and without this fix) but alarming to see in
+            # a terminal, worth silencing properly rather than leaving it.
+            **preview_kwargs,
         )
         tf.write(rgb16, **main_kwargs)

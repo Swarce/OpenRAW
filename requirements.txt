@@ -2,6 +2,20 @@ numpy>=1.24
 opencv-contrib-python>=4.8   # needs ximgproc (guidedFilter) -- plain opencv-python won't have it
 pillow>=10.0
 tifffile>=2023.7
+imagecodecs   # REQUIRED for the preview thumbnail's JPEG compression
+              # (dng_writer.py write_preview=True, the default). tifffile
+              # itself has built-in Deflate/zlib support with no extra
+              # dependency, but JPEG specifically is not built in -- a
+              # real bug shipped where this was missing from here
+              # entirely, crashing the whole pipeline run on any machine
+              # without it already installed for some other reason (it
+              # happened to be present in the environment this project
+              # was built in, from earlier unrelated testing, masking
+              # the gap). dng_writer.py now also falls back to an
+              # uncompressed preview with a warning if this is missing
+              # or fails for any other reason, rather than crashing the
+              # whole run again -- but install it; the fallback is a
+              # safety net, not a reason to skip this.
 pytest>=7.4   # dev/test only
 rawpy         # dev/test only -- rawpy IS libraw. Several tests validate
               # output DNGs against REAL libraw, not just tifffile

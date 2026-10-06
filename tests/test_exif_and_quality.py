@@ -177,6 +177,42 @@ def test_dng_has_preview_ifd_by_default(tmp_path):
         assert main.photometric == 34892
 
 
+def test_dng_preview_falls_back_gracefully_without_imagecodecs(tmp_path, monkeypatch):
+    """
+    Regression test for a real bug a user hit on Windows/Python 3.14:
+    the preview always tried JPEG compression, which needs the
+    imagecodecs package (NOT bundled with tifffile the way Deflate is).
+    With it missing, the ENTIRE pipeline run crashed just to produce a
+    thumbnail. Must now fall back to an uncompressed preview with a
+    warning instead -- main image unaffected either way.
+
+    Mocks the import failure (clean, repeatable) rather than actually
+    uninstalling imagecodecs, which would affect other tests in this
+    process.
+    """
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "imagecodecs":
+            raise ModuleNotFoundError("No module named 'imagecodecs'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    rgb16 = (np.random.default_rng(0).random((64, 64, 3)) * 65535).astype(np.uint16)
+    out = str(tmp_path / "out.dng")
+    write_linear_dng(out, rgb16)  # must NOT raise
+
+    with tifffile.TiffFile(out) as tf:
+        assert tf.pages[0].compression == 1  # fell back to uncompressed preview
+        main = main_page(tf)
+        assert main.photometric == 34892
+
+    arr = main_array(out)
+    assert np.array_equal(arr, rgb16)  # main image completely unaffected
+
+
 def test_dng_no_preview_option(tmp_path):
     rgb16 = (np.random.default_rng(0).random((32, 32, 3)) * 65535).astype(np.uint16)
     out = str(tmp_path / "out.dng")
