@@ -20,6 +20,7 @@ from PIL import Image
 
 from pseudoraw import PseudoRawPipeline, PipelineConfig
 from pseudoraw.tonecurve import srgb_to_linear, linear_to_srgb
+from .helpers import main_page, main_array
 
 
 def _make_test_jpeg(path: str, quality: int = 60) -> None:
@@ -47,7 +48,7 @@ def test_pipeline_runs_and_writes_valid_dng(jpeg_path, tmp_path):
 
     assert os.path.exists(out)
     with tifffile.TiffFile(out) as tf:
-        page = tf.pages[0]
+        page = main_page(tf)
         assert page.photometric == 34892  # LinearRaw
         assert page.dtype == np.uint16
         assert page.shape == (128, 192, 3)
@@ -62,7 +63,7 @@ def test_saturated_patches_keep_their_hue(jpeg_path, tmp_path):
     pipeline = PseudoRawPipeline()
     pipeline.run_to_dng(jpeg_path, out)
 
-    arr = tifffile.imread(out).astype(np.float32) / 65535.0
+    arr = main_array(out).astype(np.float32) / 65535.0
     preview = linear_to_srgb(arr)
 
     red_patch = preview[40, 40]
@@ -89,22 +90,32 @@ def test_bitdepth_expansion_increases_tonal_resolution(jpeg_path, tmp_path):
     row_u8 = (d.rgb[100, :, 0] * 255).astype(np.uint8)
     levels_8bit = len(np.unique(row_u8))
 
-    arr16 = tifffile.imread(out)
+    arr16 = main_array(out)
     row16 = arr16[100, :, 0]
     levels_16bit = len(np.unique(row16))
 
     assert levels_16bit > levels_8bit
 
 
-def test_dng_is_compressed_by_default(jpeg_path, tmp_path):
+def test_dng_default_is_uncompressed_and_compress_opt_in_is_smaller(jpeg_path, tmp_path):
     """
-    Regression test for a real bug a user hit: write_linear_dng() used to
-    write fully uncompressed 16-bit data, making a 24MP photo ~140MB for
-    no reason. compress=True (the default) must produce a meaningfully
-    smaller, still-valid file than compress=False on the same data.
+    Corrected regression test, superseding an earlier wrong version of
+    this test that asserted compress=True was the (correct) default.
+    It was NOT correct: real libraw testing (via rawpy) found Deflate-
+    compressed output unreadable by libraw-based tools (darktable,
+    RawTherapee, etc) -- see dng_writer.py's write_linear_dng docstring
+    and test_exif_and_quality.py's test_dng_default_settings_actually_open_in_real_libraw,
+    which is the test that actually catches that class of bug (this one
+    only checks file size and tifffile-self-consistency, both necessary
+    but not sufficient, which is exactly how the wrong default got
+    shipped in the first place).
+
+    What THIS test still correctly covers: compress=True, when a caller
+    explicitly opts into it, really is smaller and really is still
+    lossless -- it's just not the default anymore.
     """
-    import tifffile
     from pseudoraw.dng_writer import write_linear_dng
+    from .helpers import main_page as _main_page, main_array as _main_array
 
     pipeline = PseudoRawPipeline()
     result = pipeline.run(jpeg_path)
@@ -117,22 +128,18 @@ def test_dng_is_compressed_by_default(jpeg_path, tmp_path):
     compressed_size = os.path.getsize(compressed_path)
     uncompressed_size = os.path.getsize(uncompressed_path)
 
-    # Uncompressed must be ~H*W*3*2 raw pixel bytes plus only a small
-    # TIFF header/IFD/tag overhead (no hidden compression sneaking in
-    # when it's turned off) -- pins the baseline we're measuring against.
-    h, w = result.rgb16.shape[:2]
-    pixel_bytes = h * w * 3 * 2
-    assert pixel_bytes <= uncompressed_size < pixel_bytes + 4096
-
-    # Compressed should be smaller on real (non-random) image content.
     assert compressed_size < uncompressed_size
 
-    # And still a valid, correctly-tagged, pixel-identical DNG.
     with tifffile.TiffFile(compressed_path) as tf:
-        page = tf.pages[0]
+        page = _main_page(tf)
         assert page.photometric == 34892
-    arr = tifffile.imread(compressed_path)
-    assert np.array_equal(arr, result.rgb16)  # lossless
+    arr = _main_array(compressed_path)
+    assert np.array_equal(arr, result.rgb16)  # still lossless when opted into
+
+    # Default (no compress= passed) must match compress=False.
+    default_path = str(tmp_path / "default.dng")
+    write_linear_dng(default_path, result.rgb16)
+    assert os.path.getsize(default_path) == uncompressed_size
 
 
 def test_tonecurve_roundtrip_is_near_exact():
@@ -201,6 +208,6 @@ def test_invisp_path_runs_real_network_and_writes_valid_dng(jpeg_path, tmp_path)
     assert result.linear_rgb.std() > 1e-4  # not a flat/constant output
 
     with tifffile.TiffFile(out) as tf:
-        page = tf.pages[0]
+        page = main_page(tf)
         assert page.photometric == 34892
         assert page.dtype == np.uint16

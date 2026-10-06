@@ -3,6 +3,15 @@ opencv-contrib-python>=4.8   # needs ximgproc (guidedFilter) -- plain opencv-pyt
 pillow>=10.0
 tifffile>=2023.7
 pytest>=7.4   # dev/test only
+rawpy         # dev/test only -- rawpy IS libraw. Several tests validate
+              # output DNGs against REAL libraw, not just tifffile
+              # (which wrote the file, so of course it reads its own
+              # output back -- that's necessary but was NOT sufficient:
+              # a real bug shipped where tifffile round-tripped a file
+              # perfectly that real libraw rejected outright). Those
+              # tests skip gracefully if rawpy isn't installed, but
+              # installing it is strongly recommended -- it's the only
+              # thing in this test suite that would have caught that bug.
 
 # For the real InvISP network path (cli.py --invisp), see
 # requirements-invisp.txt instead -- torch is NOT required for the

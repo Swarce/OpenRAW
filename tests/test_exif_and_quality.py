@@ -1,15 +1,16 @@
 """
 Tests for the EXIF-preservation and core-quality improvements:
 - exif_transfer.py: real metadata carried through, nothing fabricated
-  for absent fields, GPS off by default
+  for absent fields. No GPS (dropped entirely, not just off-by-default).
 - decode.py: chroma subsampling detection, chroma-specific quality est.
 - chroma.py: 4:4:4 short-circuit
 - bitdepth.py: dither amplitude reduced in detailed regions
+- dng_writer.py: no spurious ExtraSamples tag, preview+SubIFD structure,
+  and critically: real libraw (via rawpy) actually opens the output --
+  not just our own writer round-tripping with itself.
 """
 
 from __future__ import annotations
-
-import io
 
 import numpy as np
 import pytest
@@ -22,6 +23,16 @@ from pseudoraw.exif_transfer import extract_exif, build_dng_extratags
 from pseudoraw.chroma import refine_chroma
 from pseudoraw.dng_writer import write_linear_dng
 from pseudoraw import PseudoRawPipeline, PipelineConfig
+
+from .helpers import main_page, main_array
+
+try:
+    import rawpy
+    _HAVE_RAWPY = True
+except ImportError:
+    _HAVE_RAWPY = False
+
+needs_rawpy = pytest.mark.skipif(not _HAVE_RAWPY, reason="needs rawpy (= libraw)")
 
 
 def _make_jpeg_with_exif(path, make="FUJIFILM", model="X-T4", subsampling=2):
@@ -41,9 +52,6 @@ def _make_jpeg_with_exif(path, make="FUJIFILM", model="X-T4", subsampling=2):
         Base.DateTimeOriginal: "2026:05:01 12:30:00",
     }
     exif.get_ifd(IFD.Exif).update(sub_ifd)
-
-    gps_ifd = {1: "N", 2: (10.0, 20.0, 30.0), 3: "W", 4: (40.0, 50.0, 60.0)}
-    exif.get_ifd(IFD.GPSInfo).update(gps_ifd)
 
     img.save(path, format="JPEG", quality=90, exif=exif, subsampling=subsampling)
 
@@ -68,8 +76,7 @@ def test_extract_exif_pulls_real_camera_fields(tmp_path):
     assert fields["ifd0"][Base.Orientation] == 6
     assert fields["exif_sub"][Base.ISOSpeedRatings] == 400
     assert fields["exif_sub"][Base.LensModel] == "XF56mmF1.2 R"
-    # GPS is extracted (available if opted into), just not written by default
-    assert 1 in fields["gps"]
+    assert "gps" not in fields  # dropped entirely -- see exif_transfer.py
 
 
 def test_extract_exif_on_auto_mode_jpeg_has_no_fabricated_fields(tmp_path):
@@ -84,24 +91,6 @@ def test_extract_exif_on_auto_mode_jpeg_has_no_fabricated_fields(tmp_path):
 
     assert fields["ifd0"] == {}
     assert fields["exif_sub"] == {}
-    assert fields["gps"] == {}
-
-
-def test_build_dng_extratags_omits_gps_by_default(tmp_path):
-    p = str(tmp_path / "with_exif.jpg")
-    _make_jpeg_with_exif(p)
-    img = Image.open(p)
-    img.load()
-    fields = extract_exif(img.getexif())
-
-    tags_default = build_dng_extratags(fields)
-    tags_gps = build_dng_extratags(fields, preserve_gps=True)
-    gps_tag_ids = {1, 2, 3, 4}
-
-    assert not any(t[0] in gps_tag_ids for t in tags_default)
-    # Currently a documented no-op either way (see exif_transfer.py), but
-    # pin that it doesn't silently start doing something wrong/different.
-    assert not any(t[0] in gps_tag_ids for t in tags_gps)
 
 
 def test_dng_write_carries_real_make_model_overriding_placeholder(tmp_path):
@@ -116,7 +105,7 @@ def test_dng_write_carries_real_make_model_overriding_placeholder(tmp_path):
     write_linear_dng(out, rgb16, exif_fields=fields)
 
     with tifffile.TiffFile(out) as tf:
-        tags = tf.pages[0].tags
+        tags = main_page(tf).tags
         assert tags[271].value == "FUJIFILM"
         assert tags[272].value == "X-T4"
         # UniqueCameraModel always stays the synthetic-sensor label
@@ -149,12 +138,12 @@ def test_dng_write_has_no_extrasamples_tag(tmp_path):
         write_linear_dng(out, rgb16)
 
         with tifffile.TiffFile(out) as tf:
-            page = tf.pages[0]
+            page = main_page(tf)
             assert 338 not in page.tags, f"spurious ExtraSamples tag at {h}x{w}"
             assert page.tags[277].value == 3  # SamplesPerPixel
             assert page.photometric == 34892
 
-        arr = tifffile.imread(out)
+        arr = main_array(out)
         assert np.array_equal(arr, rgb16)
 
 
@@ -164,10 +153,81 @@ def test_dng_write_without_exif_fields_keeps_placeholder(tmp_path):
     write_linear_dng(out, rgb16, exif_fields=None)
 
     with tifffile.TiffFile(out) as tf:
-        tags = tf.pages[0].tags
+        tags = main_page(tf).tags
         assert tags[271].value == "pseudoraw"
         assert tags[272].value == "pseudoraw-poc"
         assert 33437 not in tags  # no fabricated FNumber
+
+
+def test_dng_has_preview_ifd_by_default(tmp_path):
+    """A DNG with only the full-res main image (no preview) is spec-legal
+    but a known real-world source of broken-looking previews -- found
+    investigating a user's bug report. Pin that IFD0 is a usably-small
+    preview and the main data lives in a SubIFD off of it."""
+    rgb16 = (np.random.default_rng(0).random((512, 512, 3)) * 65535).astype(np.uint16)
+    out = str(tmp_path / "out.dng")
+    write_linear_dng(out, rgb16, preview_max_dim=128)
+
+    with tifffile.TiffFile(out) as tf:
+        preview_page = tf.pages[0]
+        assert max(preview_page.shape[:2]) <= 128
+        assert preview_page.photometric == 6  # YCbCr, standard for embedded JPEG
+        main = main_page(tf)
+        assert main.shape == (512, 512, 3)
+        assert main.photometric == 34892
+
+
+def test_dng_no_preview_option(tmp_path):
+    rgb16 = (np.random.default_rng(0).random((32, 32, 3)) * 65535).astype(np.uint16)
+    out = str(tmp_path / "out.dng")
+    write_linear_dng(out, rgb16, write_preview=False)
+
+    with tifffile.TiffFile(out) as tf:
+        assert len(tf.pages) == 1
+        assert tf.pages[0].photometric == 34892
+
+
+@needs_rawpy
+def test_dng_default_settings_actually_open_in_real_libraw(tmp_path):
+    """
+    THE regression test that matters most here. Previous tests in this
+    file only checked that tifffile (which wrote the file) can read it
+    back -- that's necessary but not sufficient, and it's exactly how a
+    real bug got through: default settings (Deflate compression) wrote
+    files that tifffile round-tripped perfectly but real libraw rejected
+    outright with "Unsupported file format or not RAW file". Found by
+    testing against actual rawpy/libraw, not by inspecting tags harder.
+
+    This test is the one that would have caught it: write with pipeline
+    defaults, open with real libraw, run an actual raw.postprocess().
+    """
+    rgb16 = (np.random.default_rng(0).random((256, 256, 3)) * 65535).astype(np.uint16)
+    out = str(tmp_path / "out.dng")
+    write_linear_dng(out, rgb16)  # defaults: compress=False, write_preview=True
+
+    with rawpy.imread(out) as raw:
+        assert raw.sizes.raw_width == 256
+        assert raw.sizes.raw_height == 256
+        processed = raw.postprocess()
+        assert processed.shape[0] > 0 and processed.shape[1] > 0
+
+
+@needs_rawpy
+def test_dng_compress_true_is_known_incompatible_with_libraw(tmp_path):
+    """
+    Documents, with a real reproducible test (not just a comment), why
+    compress=True is opt-in rather than the default: real libraw
+    rejects it. If a future libraw/imagecodecs/tifffile version fixes
+    this, this test will start failing its xfail and that's the signal
+    to reconsider the default -- not a silent assumption either way.
+    """
+    rgb16 = (np.random.default_rng(0).random((64, 64, 3)) * 65535).astype(np.uint16)
+    out = str(tmp_path / "out.dng")
+    write_linear_dng(out, rgb16, compress=True)
+
+    with pytest.raises(Exception):
+        with rawpy.imread(out) as raw:
+            raw.postprocess()
 
 
 # ---- decode.py: chroma subsampling + per-channel quality ----
@@ -199,7 +259,7 @@ def test_full_pipeline_end_to_end_with_exif_and_444_jpeg(tmp_path):
 
     assert result.decoded.is_chroma_subsampled is False
     with tifffile.TiffFile(out) as tf:
-        assert tf.pages[0].tags[271].value == "FUJIFILM"
+        assert main_page(tf).tags[271].value == "FUJIFILM"
 
 
 # ---- chroma.py: 4:4:4 short-circuit ----

@@ -17,13 +17,17 @@ What's deliberately NOT copied:
   offsets/references tied to the original file's exact byte layout.
   Blindly copying it into a restructured file risks copying garbage or
   actively misleading data. Not parsed, not copied.
-- GPS (tag 34853 sub-IFD): off by default. This is a real, easy-to-miss
-  privacy issue -- plenty of people don't realize their JPEGs carry
-  capture location, and a "conversion" tool that silently forwards it
-  into every output file is a quiet privacy leak. Pass preserve_gps=True
-  to opt in explicitly; see build_dng_extratags()'s docstring.
+- GPS: not extracted, not copied, no opt-in flag. An earlier version of
+  this module extracted GPS fields with an off-by-default preserve_gps
+  flag, but the flag had no effect yet (writing GPS tags correctly needs
+  a real GPSInfo sub-IFD, which wasn't implemented) -- decided to just
+  drop GPS handling entirely rather than carry a half-built, currently-
+  inert feature around. If GPS preservation becomes a real requirement,
+  rebuild it properly (real sub-IFD, explicit opt-in) rather than
+  resurrecting this.
 - The embedded JPEG thumbnail some cameras store in EXIF: irrelevant to
-  a DNG, not copied.
+  a DNG, not copied. (dng_writer.py generates its own preview thumbnail
+  from the reconstructed pixel data instead -- see that file.)
 
 Known simplification, stated plainly: these tags are written directly
 into the DNG's main IFD0 via the same extratags mechanism dng_writer.py
@@ -73,30 +77,18 @@ _EXIF_SUB_FIELDS = [
     (Base.ExposureBiasValue, "2i", "ExposureBiasValue"),  # SRATIONAL
 ]
 
-_GPS_FIELDS = [
-    (1, "s", "GPSLatitudeRef"),
-    (2, "2I", "GPSLatitude"),  # RATIONAL[3]
-    (3, "s", "GPSLongitudeRef"),
-    (4, "2I", "GPSLongitude"),  # RATIONAL[3]
-    (5, "B", "GPSAltitudeRef"),
-    (6, "2I", "GPSAltitude"),
-    (7, "2I", "GPSTimeStamp"),  # RATIONAL[3]
-    (29, "s", "GPSDateStamp"),
-]
-
 
 def extract_exif(pil_exif) -> dict:
     """
     pil_exif: a PIL.Image.Exif, e.g. from Image.open(path).getexif()
         (call .load() on the image first so it's actually populated).
-    Returns: {'ifd0': {tag_id: value}, 'exif_sub': {tag_id: value},
-              'gps': {tag_id: value}} -- only tags from our curated
-    allowlists above that are ACTUALLY PRESENT in the source. No
-    fabrication, no defaults substituted for absent fields.
+    Returns: {'ifd0': {tag_id: value}, 'exif_sub': {tag_id: value}} --
+    only tags from our curated allowlists above that are ACTUALLY
+    PRESENT in the source. No fabrication, no defaults substituted for
+    absent fields. No GPS -- see module docstring.
     """
     ifd0_ids = {t[0] for t in _IFD0_FIELDS}
     sub_ids = {t[0] for t in _EXIF_SUB_FIELDS}
-    gps_ids = {t[0] for t in _GPS_FIELDS}
 
     ifd0 = {k: v for k, v in dict(pil_exif).items() if k in ifd0_ids}
 
@@ -106,13 +98,7 @@ def extract_exif(pil_exif) -> dict:
         sub = {}
     sub = {k: v for k, v in sub.items() if k in sub_ids}
 
-    try:
-        gps_raw = dict(pil_exif.get_ifd(IFD.GPSInfo))
-    except Exception:
-        gps_raw = {}
-    gps = {k: v for k, v in gps_raw.items() if k in gps_ids}
-
-    return {"ifd0": ifd0, "exif_sub": sub, "gps": gps}
+    return {"ifd0": ifd0, "exif_sub": sub}
 
 
 def _rational_to_flat(value, signed: bool) -> list[int] | None:
@@ -149,11 +135,11 @@ def _value_to_tifffile(dtype: str, value):
         except Exception:
             return None
     if dtype in ("2I", "2i"):
-        # Could be a single rational or (for LensSpecification/GPS
-        # coordinates) a tuple of several rationals. Checked via
-        # IFDRational specifically -- see _rational_to_flat's docstring
-        # for why generic hasattr(..., 'numerator') is wrong here (plain
-        # ints have that attribute too).
+        # Could be a single rational or (for LensSpecification) a tuple
+        # of several rationals. Checked via IFDRational specifically --
+        # see _rational_to_flat's docstring for why generic
+        # hasattr(..., 'numerator') is wrong here (plain ints have that
+        # attribute too).
         if isinstance(value, (tuple, list)) and value and isinstance(value[0], IFDRational):
             flat: list[int] = []
             for v in value:
@@ -177,15 +163,9 @@ def _value_to_tifffile(dtype: str, value):
     return None
 
 
-def build_dng_extratags(exif_fields: dict, preserve_gps: bool = False) -> list:
+def build_dng_extratags(exif_fields: dict) -> list:
     """
     exif_fields: the dict returned by extract_exif().
-    preserve_gps: if True, also carry GPSInfo tags through. OFF BY
-        DEFAULT -- GPS is capture location, a real privacy-sensitive
-        field most people don't think about being embedded in photos.
-        A conversion tool silently forwarding it into every output is
-        exactly the kind of quiet leak worth not doing by default. Only
-        enable this for a workflow where that's actually wanted.
     Returns: a list of tifffile extratag tuples ready to extend
         dng_writer.py's own extratags list with. Fields that are absent
         from exif_fields, or that fail to convert cleanly, are simply
@@ -203,20 +183,5 @@ def build_dng_extratags(exif_fields: dict, preserve_gps: bool = False) -> list:
             continue
         count = 1 if dtype in ("s", "H", "B") else len(converted) // 2
         tags.append((tag_id, dtype, count, converted, False))
-
-    if preserve_gps and exif_fields.get("gps"):
-        # NOT implemented yet, deliberately: GPS tags (1-29) are only
-        # meaningful inside their own GPSInfo sub-IFD -- tag 1 means
-        # GPSLatitudeRef there, but means nothing as a standalone IFD0
-        # tag, which is the only place this module can currently write
-        # to (see module docstring's "Known simplification"). Writing
-        # them straight into IFD0 wouldn't corrupt anything (readers
-        # would just ignore an unrecognized tag 1), but it also wouldn't
-        # actually preserve GPS data in any form a real reader could use
-        # -- so rather than write tags that silently do nothing useful,
-        # this is left as a documented gap. preserve_gps currently has
-        # NO EFFECT until proper sub-IFD writing exists; revisit if GPS
-        # preservation becomes a real requirement.
-        pass
 
     return tags

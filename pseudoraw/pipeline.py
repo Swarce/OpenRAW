@@ -41,10 +41,17 @@ class PipelineConfig:
     seed: int | None = 0
 
     # Output DNG: compression and real camera-metadata passthrough.
-    dng_compress: bool = True
+    # dng_compress defaults False -- see dng_writer.py's write_linear_dng
+    # docstring: Deflate (True) is confirmed via real libraw testing to
+    # NOT be readable by libraw-based tools (darktable, RawTherapee,
+    # etc). Only flip this on if you've verified your target reader
+    # actually supports it.
+    dng_compress: bool = False
     dng_compression_level: int = 9
-    preserve_exif: bool = True
-    preserve_gps: bool = False  # off by default -- see exif_transfer.py
+    preserve_exif: bool = True  # no GPS ever -- dropped entirely, see exif_transfer.py
+    write_preview: bool = True  # small JPEG preview + SubIFD main image -- see dng_writer.py
+    preview_max_dim: int = 1024
+    preview_quality: int = 90
 
     # Real InvISP network path (pseudoraw/invisp_bridge.py), as an
     # alternative to the classical deblock/chroma/tonecurve stages above.
@@ -129,6 +136,8 @@ class PseudoRawPipeline:
             compress=cfg.dng_compress,
             compression_level=cfg.dng_compression_level,
             exif_fields=result.decoded.exif_fields if cfg.preserve_exif else None,
-            preserve_gps=cfg.preserve_gps,
+            write_preview=cfg.write_preview,
+            preview_max_dim=cfg.preview_max_dim,
+            preview_quality=cfg.preview_quality,
         )
         return result

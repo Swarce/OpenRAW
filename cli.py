@@ -56,19 +56,22 @@ def main() -> int:
     )
     p.add_argument("--invisp-pretrained-dir", default="pretrained")
     p.add_argument("--invisp-device", default="cpu", help="'cpu' or 'cuda:0' etc.")
-    p.add_argument("--no-compress", action="store_true", help="write fully uncompressed DNG (not recommended, see dng_writer.py)")
-    p.add_argument("--compression-level", type=int, default=9, help="1 (fastest) - 9 (smallest), default 9")
-    p.add_argument("--no-exif", action="store_true", help="don't carry camera metadata (Make/Model/lens/exposure/etc) from the source JPEG into the DNG")
     p.add_argument(
-        "--preserve-gps",
+        "--compress",
         action="store_true",
         help=(
-            "Currently a no-op (see exif_transfer.py: GPS needs a proper sub-IFD "
-            "writer, not implemented yet) -- reserved for when that's done. "
-            "GPS is off by default even once implemented: it's capture location, "
-            "worth opting into deliberately, not forwarding silently."
+            "Write Deflate-compressed DNG (smaller, but CONFIRMED via real libraw "
+            "testing to be unreadable by libraw-based tools -- darktable, RawTherapee, "
+            "etc. Default is uncompressed, which is larger but works everywhere tested. "
+            "Only use this if you've verified your specific target reader supports it. "
+            "See dng_writer.py's write_linear_dng docstring."
         ),
     )
+    p.add_argument("--compression-level", type=int, default=9, help="1 (fastest) - 9 (smallest), only applies with --compress")
+    p.add_argument("--no-exif", action="store_true", help="don't carry camera metadata (Make/Model/lens/exposure/etc) from the source JPEG into the DNG. GPS is never carried -- dropped entirely, see exif_transfer.py")
+    p.add_argument("--no-preview", action="store_true", help="skip the small JPEG preview IFD (just the main full-res image, no quick-look thumbnail)")
+    p.add_argument("--preview-max-dim", type=int, default=1024)
+    p.add_argument("--preview-quality", type=int, default=90, help="JPEG quality 0-100 for the preview (not the main data, which stays lossless)")
     args = p.parse_args()
 
     config = PipelineConfig(
@@ -83,10 +86,12 @@ def main() -> int:
         invisp_camera=args.invisp_camera,
         invisp_pretrained_dir=args.invisp_pretrained_dir,
         invisp_device=args.invisp_device,
-        dng_compress=not args.no_compress,
+        dng_compress=args.compress,
         dng_compression_level=args.compression_level,
         preserve_exif=not args.no_exif,
-        preserve_gps=args.preserve_gps,
+        write_preview=not args.no_preview,
+        preview_max_dim=args.preview_max_dim,
+        preview_quality=args.preview_quality,
     )
 
     pipeline = PseudoRawPipeline(config)

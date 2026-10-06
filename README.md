@@ -169,15 +169,43 @@ preprocessing script.
 
 ## What's genuinely demonstrated by this POC
 
-- A real, valid Linear DNG that round-trips through `tifffile` with
-  correct tags (verified: photometric interpretation, color matrix,
+- A real, valid Linear DNG that opens in **real libraw** (via `rawpy`),
+  not just round-trips through `tifffile` (which wrote the file — that
+  it reads its own output back is necessary but was NOT sufficient: see
+  the compression finding below for exactly how that gap shipped a real
+  bug). Confirmed with an actual `raw.postprocess()` call, not just an
+  open. Tags verified too: photometric interpretation, color matrix,
   calibration illuminant, white/black level, hue identity of saturated
-  test patches survives the full pipeline).
+  test patches survives the full pipeline, no spurious ExtraSamples tag.
+- A **preview + SubIFD structure** (small JPEG preview as IFD0, full-res
+  LinearRaw data in a SubIFD per DNG's own recommended layout) so
+  quick-look viewers and raw-import screens have something to show
+  without a full raw decode — added after a bug report's file turned out
+  to have neither a working compressed main image nor any preview at all.
 - Measurable deblocking on a low-quality (q15) synthetic JPEG — see
   `examples/deblock_comparison.png`, generated from the test image in
   this repo.
 - Measurable increase in distinguishable tonal levels across a gradient
   after dithering (`tests/test_pipeline.py::test_bitdepth_expansion_increases_tonal_resolution`).
+
+**A real compression finding, corrected from an earlier wrong claim:**
+this project briefly defaulted to Deflate-compressed DNG output,
+documented at the time as "widely supported — Lightroom/ACR/darktable/
+RawTherapee/libraw all read it." That claim was never actually tested
+against a real raw-decoding library, and it was wrong: real libraw (via
+`rawpy`) rejects Deflate, LZW, and PackBits compression for this DNG
+structure outright ("Unsupported file format or not RAW file"), found
+while debugging a user's bug report of generated files looking corrupt.
+Only uncompressed and lossy JPEG (unusable for 16-bit main data — tested
+separately, ~30000/65535 mean pixel error) work. **Default is now
+uncompressed** — larger files (a 24MP photo is ~140MB), but confirmed
+working across the libraw-based ecosystem (darktable, RawTherapee, and
+more), which is a lot of where this project's actual users are likely to
+be. Deflate is still available as an explicit opt-in (`--compress`) for
+anyone who's verified their specific target reader supports it. See
+`pseudoraw/dng_writer.py`'s `write_linear_dng` docstring for the full
+detail, including a real (just not yet implemented) path to genuine
+lossless compression via per-channel LJPEG.
 
 ## What's explicitly NOT yet done (the honest backlog)
 
