@@ -71,10 +71,29 @@ if __name__ == "__main__":
     # works, a clear error instead of a cryptic one when it can't -- see
     # docs/training.md for what this means on your actual machine.
     if not torch.cuda.is_available():
-        raise RuntimeError(
-            "No CUDA GPU available (torch.cuda.is_available() is False). "
-            "This training script trains on GPU only -- see docs/training.md."
-        )
+        # Diagnose WHY, instead of just "no GPU" -- the usual cause on Windows
+        # and macOS is a CPU-only PyTorch build, which `pip install torch` from
+        # PyPI installs there by default, even on machines with an NVIDIA card.
+        import shutil, sys as _s
+        _cuda_build = torch.version.cuda
+        _smi = shutil.which("nvidia-smi")
+        if _cuda_build is None:
+            _why = (f"Your PyTorch ({torch.__version__}) is a CPU-only build: it can't use any GPU. "
+                    f"On Windows/macOS, `pip install torch` from PyPI installs that build by default.\n"
+                    f"With an NVIDIA GPU, install the CUDA build:\n"
+                    f"    pip uninstall -y torch torchvision\n"
+                    f"    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130\n"
+                    f"(Python {_s.version_info.major}.{_s.version_info.minor} needs a current CUDA index like cu130; "
+                    f"older ones such as cu118/cu121 have no wheels for new Pythons.)")
+        elif not _smi:
+            _why = (f"PyTorch is a CUDA {_cuda_build} build, but no NVIDIA driver was found (nvidia-smi not on PATH). "
+                    f"Install/update the NVIDIA driver. AMD/Intel GPUs can't run CUDA builds.")
+        else:
+            _why = (f"PyTorch is a CUDA {_cuda_build} build and an NVIDIA driver is present, but CUDA still isn't "
+                    f"usable -- usually a driver too old for CUDA {_cuda_build}. Update the driver, or install a "
+                    f"PyTorch build for an older CUDA (see https://pytorch.org/get-started/locally/).")
+        raise RuntimeError("No usable CUDA GPU (torch.cuda.is_available() is False).\n" + _why +
+                           "\nSee docs/training.md.")
     try:
         os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
         free_mem = [int(x.split()[2]) for x in open('tmp', 'r').readlines()]

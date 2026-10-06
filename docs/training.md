@@ -7,6 +7,16 @@ full GPU training runs are not yet verified — see the bottom of this page.
 
 ## Quick start
 
+> **Windows / macOS + NVIDIA GPU:** install PyTorch's CUDA build first —
+> `pip install torch` from PyPI gives a **CPU-only** build there, which can't
+> see your GPU even though it imports fine:
+> ```bash
+> pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+> ```
+> New Pythons (3.13/3.14) need a current CUDA index like `cu130`; older ones
+> (`cu118`, `cu121`, ...) have no wheels for them. Linux gets CUDA by default.
+> `train.py` diagnoses this if it can't use your GPU.
+
 ```bash
 pip install -e ".[training]"            # torch, rawpy, colour-demosaicing
 python train.py --list-cameras           # every FiveK camera + image count

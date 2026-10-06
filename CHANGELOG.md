@@ -44,6 +44,9 @@ summarized; commit messages carry the full detail and measurements.
   upstream code and official checkpoints; training scaffolding for FiveK.
 
 ### Fixed
+- `train.py` reported "no GPU" when the real cause was a CPU-only PyTorch
+  build (PyPI's default on Windows/macOS); it now says which of CPU build /
+  missing driver / old driver it is, with the fix. Install docs updated.
 - Training preprocessing assumed InvISP's two cameras: hardcoded RGGB
   pattern, no black-level subtraction, hardcoded white levels. Now read per
   file; demosaic border overshoot (~1.5× white) clipped.
