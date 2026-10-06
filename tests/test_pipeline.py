@@ -97,49 +97,28 @@ def test_bitdepth_expansion_increases_tonal_resolution(jpeg_path, tmp_path):
     assert levels_16bit > levels_8bit
 
 
-def test_dng_default_is_uncompressed_and_compress_opt_in_is_smaller(jpeg_path, tmp_path):
+def test_dng_default_is_ljpeg_and_much_smaller_than_uncompressed(jpeg_path, tmp_path):
     """
-    Corrected regression test, superseding an earlier wrong version of
-    this test that asserted compress=True was the (correct) default.
-    It was NOT correct: real libraw testing (via rawpy) found Deflate-
-    compressed output unreadable by libraw-based tools (darktable,
-    RawTherapee, etc) -- see dng_writer.py's write_linear_dng docstring
-    and test_exif_and_quality.py's test_dng_default_settings_actually_open_in_real_libraw,
-    which is the test that actually catches that class of bug (this one
-    only checks file size and tifffile-self-consistency, both necessary
-    but not sufficient, which is exactly how the wrong default got
-    shipped in the first place).
-
-    What THIS test still correctly covers: compress=True, when a caller
-    explicitly opts into it, really is smaller and really is still
-    lossless -- it's just not the default anymore.
+    User report: ~108MB files made Luminar sluggish on mobile. Default is now
+    lossless-JPEG tiles + 12-bit LinearizationTable (verified in Adobe's DNG
+    SDK and libraw -- see test_exif_and_quality.py). Pins: default is
+    meaningfully smaller than uncompressed, 16-bit LJPEG is bit-exact, and
+    the 12-bit default stays within a small fraction of a source step.
     """
     from pseudoraw.dng_writer import write_linear_dng
-    from .helpers import main_page as _main_page, main_array as _main_array
+    from pseudoraw.tonecurve import linear_to_srgb
+    from .helpers import decoded_linear
 
-    pipeline = PseudoRawPipeline()
-    result = pipeline.run(jpeg_path)
+    rgb16 = PseudoRawPipeline().run(jpeg_path).rgb16
+    none_p, l16_p, dflt_p = (str(tmp_path / n) for n in ("none.dng", "l16.dng", "default.dng"))
+    write_linear_dng(none_p, rgb16, compression="none")
+    write_linear_dng(l16_p, rgb16, compression="ljpeg", bit_depth=16)
+    write_linear_dng(dflt_p, rgb16)
 
-    compressed_path = str(tmp_path / "compressed.dng")
-    uncompressed_path = str(tmp_path / "uncompressed.dng")
-    write_linear_dng(compressed_path, result.rgb16, compress=True)
-    write_linear_dng(uncompressed_path, result.rgb16, compress=False)
-
-    compressed_size = os.path.getsize(compressed_path)
-    uncompressed_size = os.path.getsize(uncompressed_path)
-
-    assert compressed_size < uncompressed_size
-
-    with tifffile.TiffFile(compressed_path) as tf:
-        page = _main_page(tf)
-        assert page.photometric == 34892
-    arr = _main_array(compressed_path)
-    assert np.array_equal(arr, result.rgb16)  # still lossless when opted into
-
-    # Default (no compress= passed) must match compress=False.
-    default_path = str(tmp_path / "default.dng")
-    write_linear_dng(default_path, result.rgb16)
-    assert os.path.getsize(default_path) == uncompressed_size
+    assert np.array_equal(decoded_linear(l16_p), rgb16)  # truly lossless
+    assert os.path.getsize(dflt_p) < 0.75 * os.path.getsize(none_p)
+    to_steps = lambda a: linear_to_srgb(a.astype(np.float32) / 65535) * 255
+    assert np.abs(to_steps(decoded_linear(dflt_p)) - to_steps(rgb16)).max() <= 0.1
 
 
 def test_tonecurve_roundtrip_is_near_exact():

@@ -31,7 +31,7 @@ import tifffile
 
 from .colormatrix import dng_color_matrix1
 from .exif_transfer import build_dng_extratags
-from .tonecurve import linear_to_srgb
+from .tonecurve import linear_to_srgb, srgb_to_linear
 
 DNG_PHOTOMETRIC_LINEAR_RAW = 34892
 CALIBRATION_ILLUMINANT_D65 = 21
@@ -119,13 +119,88 @@ def _rational_flat(value: float, denom: int = 1_000_000) -> list[int]:
     return [int(round(value * denom)), denom]
 
 
+
+LJPEG_TILE = 256
+_VALID_BIT_DEPTHS = (16, 14, 12, 10)
+
+
+def _linearization_table(bits: int) -> np.ndarray:
+    """DNG LinearizationTable (tag 50712): code value -> linear uint16.
+    Codes are sRGB-gamma encoded, so precision is spent perceptually evenly
+    (the same idea as the tone curves inside Nikon/Leica raw files)."""
+    n = 1 << bits
+    g = np.arange(n, dtype=np.float32) / (n - 1)
+    return np.round(srgb_to_linear(g) * 65535.0).astype(np.uint16)
+
+
+def _encode_codes(rgb16: np.ndarray, table: np.ndarray) -> np.ndarray:
+    """Exact nearest-table-entry code for every linear value."""
+    n = len(table)
+    t = table.astype(np.int64)
+    x = rgb16.astype(np.int64)
+    code = np.clip(np.round(linear_to_srgb(rgb16.astype(np.float32) / 65535.0) * (n - 1)), 0, n - 1).astype(np.int64)
+    for d in (-1, 1):  # gamma rounding can land one entry off; fix it
+        alt = np.clip(code + d, 0, n - 1)
+        code = np.where(np.abs(t[alt] - x) < np.abs(t[code] - x), alt, code)
+    return code.astype(np.uint16)
+
+
+def _ljpeg_tiles(data: np.ndarray, bits: int, tile: int = LJPEG_TILE):
+    """Yield each tile as a 3-component lossless JPEG (ITU T.81 process 14,
+    predictor 1, no color transform) -- the layout Adobe's own DNG Converter
+    uses for linear DNGs. Edge tiles are zero-padded to full tile size."""
+    import imagecodecs
+    h, w, c = data.shape
+    for ty in range(0, h, tile):
+        for tx in range(0, w, tile):
+            t = np.zeros((tile, tile, c), dtype=np.uint16)
+            blk = data[ty:ty + tile, tx:tx + tile]
+            t[:blk.shape[0], :blk.shape[1]] = blk
+            yield imagecodecs.jpeg8_encode(
+                t, lossless=True, predictor=1, bitspersample=bits,
+                colorspace="RGB", outcolorspace="RGB",
+            )
+
+
+def _main_image_payload(rgb16: np.ndarray, compression: str, bit_depth: int):
+    """Return (data, extra_write_kwargs, extra_raw_ifd_tags) for the main image."""
+    if compression == "none":
+        # Uncompressed is always bit-exact 16-bit linear (bit_depth ignored).
+        return rgb16, {}, []
+    if compression != "ljpeg":
+        raise ValueError(f"compression must be 'ljpeg' or 'none', got {compression!r}")
+    if bit_depth not in _VALID_BIT_DEPTHS:
+        raise ValueError(f"bit_depth must be one of {_VALID_BIT_DEPTHS}, got {bit_depth}")
+    try:  # probe BEFORE writing anything: needs imagecodecs w/ libjpeg-turbo >= 3 lossless
+        import imagecodecs
+        imagecodecs.jpeg8_encode(np.zeros((8, 8, 3), np.uint16), lossless=True, predictor=1,
+                                 bitspersample=bit_depth, colorspace="RGB", outcolorspace="RGB")
+    except Exception as e:
+        print(f"[pseudoraw] lossless JPEG unavailable ({type(e).__name__}: {e}) -- install/upgrade "
+              f"'imagecodecs' (requirements.txt). Writing UNCOMPRESSED (larger, still valid) instead.")
+        return rgb16, {}, []
+    raw_tags = []
+    if bit_depth == 16:
+        data = rgb16  # bit-exact: no table, values stored as-is
+    else:
+        table = _linearization_table(bit_depth)
+        data = _encode_codes(rgb16, table)
+        raw_tags.append((50712, "H", len(table), tuple(int(v) for v in table), False))
+    kwargs = dict(
+        shape=rgb16.shape, dtype=np.uint16,
+        compression=7,  # JPEG family; payload is LOSSLESS JPEG, not DCT
+        bitspersample=bit_depth,  # explicit: tifffile otherwise assumes 12 for JPEG+uint16
+        tile=(LJPEG_TILE, LJPEG_TILE),
+    )
+    return _ljpeg_tiles(data, bit_depth), kwargs, raw_tags
+
 def write_linear_dng(
     path: str,
     rgb16: np.ndarray,
     source_jpeg_path: str = "",
     pipeline_version: str = "0.0.1-poc",
-    compress: bool = False,
-    compression_level: int = 9,
+    compression: str = "ljpeg",
+    bit_depth: int = 12,
     exif_fields: dict | None = None,
     write_preview: bool = True,
     preview_max_dim: int = 1024,
@@ -133,49 +208,33 @@ def write_linear_dng(
 ) -> None:
     """
     rgb16: uint16 HxWx3, range [0, 65535], scene-linear.
-    compress: if True, write the MAIN image with Adobe Deflate (DNG
-        Compression tag = 8) + horizontal-differencing predictor --
-        smaller files, fully lossless (verified: pixel-identical
-        round-trip). DEFAULT IS FALSE, deliberately, after real testing
-        against actual libraw (via rawpy) turned up something the
-        previous version of this docstring claimed wrongly: libraw does
-        NOT support Deflate for this kind of DNG. Also tested and also
-        failing: LZW, PackBits. The only compression libraw accepts here
-        is JPEG (tag 7) -- see the note below on why that's not usable
-        for the main data either. This matters a lot in practice: libraw
-        is what darktable, RawTherapee, and a large swath of the open
-        raw-processing ecosystem are built on, so a Deflate-compressed
-        "optimized" file was silently unreadable by exactly the tools an
-        open-source project's users are most likely to actually use.
-        Confirmed via rawpy.imread() + a full raw.postprocess() call,
-        not just a decode attempt. Set True only if you know your
-        specific target reader supports it -- Adobe's own apps (which
-        use Adobe's own DNG SDK, not libraw) likely do, but that's not
-        verified here either; don't assume compatibility you haven't
-        tested. Uncompressed means a 24MP photo is ~140MB -- a real cost,
-        but a working file beats a smaller broken one.
-
-        NOTE on JPEG (DNG Compression tag = 7) for the MAIN data: tested
-        directly and it is NOT a lossless option here -- it's standard
-        lossy DCT JPEG, and on our 16-bit samples it's not a subtle
-        quality hit, it's catastrophic (~30000/65535 mean pixel error in
-        testing). Never used for the main image, on purpose, even though
-        it's the one compression mode libraw actually accepts for this
-        photometric. (A genuinely lossless option DOES exist --
-        imagecodecs' ljpeg_encode, true lossless-predictive JPEG, the
-        scheme real cameras actually use for compressed RAW -- but it
-        only handles single-component data; our 3-channel interleaved
-        RGB would need per-channel encoding and manual TIFF tile
-        construction bypassing tifffile's built-in compression entirely.
-        Real potential future work, not done here -- see TRAINING.md-
-        style honesty: untested complexity wasn't worth rushing in
-        response to a bug report where "just turn it off" was already a
-        proven-safe fix.) JPEG IS used for the preview below, where
-        lossy is fine -- a thumbnail isn't the data.
-    compression_level: 1 (fastest) - 9 (smallest), zlib/deflate scale,
-        for the MAIN image. Default 9: this runs once per photo, not in
-        a hot loop, so there is no real reason to leave size on the
-        table for speed here.
+    compression: "ljpeg" (default) or "none".
+        "ljpeg": the main image is stored as 256x256 tiles, each a
+        3-component LOSSLESS JPEG (ITU T.81 process 14 -- the predictive
+        lossless codec real cameras use for compressed raw, NOT the lossy
+        DCT JPEG used for photos). Verified on a real 18MP photo: passes
+        Adobe's dng_validate with zero errors/warnings, and both Adobe's
+        DNG SDK and libraw decode it bit-identically to the uncompressed
+        file. History, so nobody repeats it: Deflate/LZW/PackBits were
+        tried earlier and libraw rejects all three for this DNG structure;
+        lossy DCT JPEG wrecks 16-bit data (~30000/65535 mean error); and a
+        single-component "W*3 wide" LJPEG layout passes Adobe's SDK but
+        libraw scrambles the pixels inside each tile -- only genuine
+        3-component lossless JPEG works in both.
+        "none": one uncompressed bit-exact 16-bit linear image (largest).
+    bit_depth: 16, 14, 12 (default) or 10 -- ljpeg only.
+        16 stores our linear values exactly. Below 16, values are stored as
+        sRGB-gamma code values plus a DNG LinearizationTable (tag 50712)
+        that readers use to expand them back to linear -- standard DNG,
+        same idea as the curves inside Nikon/Leica raws. Gamma spends
+        precision perceptually evenly, so fewer bits suffice. Measured on
+        a real 4896x3672 photo, error in units of the SOURCE JPEG's own
+        8-bit steps: 14-bit <= 0.015 (~62MB), 12-bit <= 0.05 (~49MB),
+        10-bit <= 0.144 (~36MB), vs 16-bit ~76MB and uncompressed 108MB.
+        12-bit still keeps 16x finer tonal steps than the source, so the
+        deband/dither headroom survives intact. For scale: the source's
+        own 8-bit pixels with zero headroom need ~24MB losslessly -- the
+        6MB JPEG is only that small because it discards information.
     exif_fields: output of exif_transfer.extract_exif() on the source
         JPEG's PIL Exif object, or None. When given, real camera metadata
         (Make/Model/lens/exposure/ISO/focal length/orientation/etc -- see
@@ -291,26 +350,13 @@ def write_linear_dng(
         # explicit and version-independent.
         extrasamples=(),
     )
-    if compress:
-        # Deflate = DNG Compression tag value 8, a standard lossless DNG
-        # compression mode (not a hack -- it's in Adobe's own DNG spec).
-        # predictor=True applies horizontal differencing before deflate,
-        # which matters a lot here specifically: adjacent pixels in a
-        # photo are usually close in value, so differencing turns that
-        # correlation into many small/zero values deflate compresses
-        # well -- without it, deflate alone barely helps on this kind of
-        # data. Tiling (vs. one giant strip) lets readers decode regions
-        # without pulling the whole plane into memory, which matters for
-        # 20+ MP output.
-        main_kwargs.update(
-            compression="deflate",
-            compressionargs={"level": int(np.clip(compression_level, 1, 9))},
-            predictor=True,
-            tile=(256, 256),
-        )
+    main_data, main_extra, main_raw_tags = _main_image_payload(rgb16, compression, bit_depth)
+    main_kwargs.update(main_extra)
+    raw_extratags = raw_extratags + main_raw_tags  # LinearizationTable is a raw-IFD tag
+    main_kwargs["extratags"] = main_kwargs["extratags"] + main_raw_tags
 
     if not write_preview:
-        tifffile.imwrite(path, rgb16, **main_kwargs)
+        tifffile.imwrite(path, main_data, **main_kwargs)
         return
 
     # Preview layout: IFD0 (preview) carries the DNG/EXIF tags, the raw
@@ -345,4 +391,4 @@ def write_linear_dng(
             # a terminal, worth silencing properly rather than leaving it.
             **preview_kwargs,
         )
-        tf.write(rgb16, **main_kwargs)
+        tf.write(main_data, **main_kwargs)

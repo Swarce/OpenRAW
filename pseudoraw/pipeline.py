@@ -40,14 +40,11 @@ class PipelineConfig:
     deband: bool = True
     seed: int | None = 0
 
-    # Output DNG: compression and real camera-metadata passthrough.
-    # dng_compress defaults False -- see dng_writer.py's write_linear_dng
-    # docstring: Deflate (True) is confirmed via real libraw testing to
-    # NOT be readable by libraw-based tools (darktable, RawTherapee,
-    # etc). Only flip this on if you've verified your target reader
-    # actually supports it.
-    dng_compress: bool = False
-    dng_compression_level: int = 9
+    # Output DNG: lossless-JPEG tiles + 12-bit LinearizationTable by default
+    # (~half the size of uncompressed, verified in Adobe's SDK and libraw).
+    # See dng_writer.write_linear_dng for the measured size/precision table.
+    dng_compression: str = "ljpeg"  # or "none"
+    dng_bit_depth: int = 12  # 16 (bit-exact), 14, 12, 10
     preserve_exif: bool = True  # no GPS ever -- dropped entirely, see exif_transfer.py
     write_preview: bool = True  # small JPEG preview + SubIFD main image -- see dng_writer.py
     preview_max_dim: int = 1024
@@ -133,8 +130,8 @@ class PseudoRawPipeline:
             result.rgb16,
             source_jpeg_path=jpeg_path,
             pipeline_version=_PIPELINE_VERSION,
-            compress=cfg.dng_compress,
-            compression_level=cfg.dng_compression_level,
+            compression=cfg.dng_compression,
+            bit_depth=cfg.dng_bit_depth,
             exif_fields=result.decoded.exif_fields if cfg.preserve_exif else None,
             write_preview=cfg.write_preview,
             preview_max_dim=cfg.preview_max_dim,

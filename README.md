@@ -188,24 +188,31 @@ preprocessing script.
 - Measurable increase in distinguishable tonal levels across a gradient
   after dithering (`tests/test_pipeline.py::test_bitdepth_expansion_increases_tonal_resolution`).
 
-**A real compression finding, corrected from an earlier wrong claim:**
-this project briefly defaulted to Deflate-compressed DNG output,
-documented at the time as "widely supported — Lightroom/ACR/darktable/
-RawTherapee/libraw all read it." That claim was never actually tested
-against a real raw-decoding library, and it was wrong: real libraw (via
-`rawpy`) rejects Deflate, LZW, and PackBits compression for this DNG
-structure outright ("Unsupported file format or not RAW file"), found
-while debugging a user's bug report of generated files looking corrupt.
-Only uncompressed and lossy JPEG (unusable for 16-bit main data — tested
-separately, ~30000/65535 mean pixel error) work. **Default is now
-uncompressed** — larger files (a 24MP photo is ~140MB), but confirmed
-working across the libraw-based ecosystem (darktable, RawTherapee, and
-more), which is a lot of where this project's actual users are likely to
-be. Deflate is still available as an explicit opt-in (`--compress`) for
-anyone who's verified their specific target reader supports it. See
-`pseudoraw/dng_writer.py`'s `write_linear_dng` docstring for the full
-detail, including a real (just not yet implemented) path to genuine
-lossless compression via per-channel LJPEG.
+**Compression, and how we got here.** Output uses **lossless-JPEG tiles**
+(the predictive lossless codec real cameras use for raw -- not the lossy
+DCT JPEG used for photos) plus, by default, a 12-bit DNG
+**LinearizationTable**. On a real 4896x3672 photo:
+
+| `--compression` / `--bit-depth` | size | error vs. bit-exact |
+|---|---|---|
+| `none` | 108 MB | none |
+| `ljpeg` / `16` | 76 MB | none (bit-exact, verified) |
+| `ljpeg` / `14` | 64 MB | <= 0.02 source steps |
+| `ljpeg` / `12` **(default)** | 50 MB | <= 0.06 source steps |
+| `ljpeg` / `10` | 37 MB | <= 0.16 source steps |
+
+"Source steps" = the input JPEG's own 8-bit quantization steps, so even 10-bit
+stays several times finer than the source. Every mode passes Adobe's reference
+`dng_validate` with zero errors/warnings and decodes correctly in BOTH Adobe's
+DNG SDK and libraw (measured, and pinned by tests). For scale: the source's own
+8-bit pixels with zero headroom need ~24 MB losslessly; a 6 MB JPEG is only that
+small because it discards information.
+
+Dead ends, documented so nobody repeats them: Deflate/LZW/PackBits (libraw
+rejects all three for this structure -- an earlier version of this README
+wrongly claimed Deflate was "widely supported"), lossy DCT JPEG (~30000/65535
+mean error on 16-bit data), and a single-component "W x 3 wide" LJPEG layout
+(passes Adobe's SDK, but libraw scrambles pixels inside every tile).
 
 ## What's explicitly NOT yet done (the honest backlog)
 

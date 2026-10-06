@@ -27,3 +27,16 @@ def ifd0_tags(tf: tifffile.TiffFile):
     """IFD0's tags -- where the DNG spec puts DNGVersion, Make/Model,
     ColorMatrix1, EXIF etc. (NOT the raw SubIFD; see test_dng_identity_tags_live_in_ifd0)."""
     return tf.pages[0].tags
+
+
+def decoded_linear(path: str):
+    """Main image as a real raw reader sees it: stored values passed through
+    the DNG LinearizationTable (tag 50712) when present, else as-is."""
+    import numpy as np
+    with tifffile.TiffFile(path) as tf:
+        page = main_page(tf)
+        arr = page.asarray()
+        if 50712 in page.tags:
+            table = np.asarray(page.tags[50712].value, dtype=np.uint16)
+            arr = table[np.minimum(arr, len(table) - 1)]
+    return arr

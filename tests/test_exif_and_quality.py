@@ -12,6 +12,8 @@ Tests for the EXIF-preservation and core-quality improvements:
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 import tifffile
@@ -24,7 +26,7 @@ from pseudoraw.chroma import refine_chroma
 from pseudoraw.dng_writer import write_linear_dng
 from pseudoraw import PseudoRawPipeline, PipelineConfig
 
-from .helpers import main_page, main_array, ifd0_tags
+from .helpers import main_page, main_array, ifd0_tags, decoded_linear
 
 try:
     import rawpy
@@ -143,8 +145,9 @@ def test_dng_write_has_no_extrasamples_tag(tmp_path):
             assert page.tags[277].value == 3  # SamplesPerPixel
             assert page.photometric == 34892
 
-        arr = main_array(out)
-        assert np.array_equal(arr, rgb16)
+        exact = str(tmp_path / f"exact_{h}x{w}.dng")
+        write_linear_dng(exact, rgb16, compression="none")
+        assert np.array_equal(main_array(exact), rgb16)
 
 
 def test_dng_write_without_exif_fields_keeps_placeholder(tmp_path):
@@ -249,21 +252,54 @@ def test_dng_default_settings_actually_open_in_real_libraw(tmp_path):
 
 
 @needs_rawpy
-def test_dng_compress_true_is_known_incompatible_with_libraw(tmp_path):
+@pytest.mark.parametrize("bit_depth,max_err_steps", [(16, 0.0), (14, 0.05), (12, 0.1), (10, 0.25)])
+def test_ljpeg_decodes_correctly_in_real_libraw(tmp_path, bit_depth, max_err_steps):
     """
-    Documents, with a real reproducible test (not just a comment), why
-    compress=True is opt-in rather than the default: real libraw
-    rejects it. If a future libraw/imagecodecs/tifffile version fixes
-    this, this test will start failing its xfail and that's the signal
-    to reconsider the default -- not a silent assumption either way.
+    Lossless-JPEG tiles (+ LinearizationTable below 16 bits) must decode in
+    REAL libraw to the same image as the uncompressed file: bit-exact at 16,
+    and within the measured precision bound (in units of one source 8-bit
+    sRGB step) below that. History: Deflate/LZW/PackBits were rejected by
+    libraw outright, and a single-component W*3 LJPEG layout passed Adobe's
+    SDK but libraw scrambled pixels inside every tile -- this test pins the
+    layout that works in BOTH.
     """
+    from pseudoraw.tonecurve import linear_to_srgb, srgb_to_linear
+    rng = np.random.default_rng(0)
+    # photo-like: smooth gradients + texture, 3 channels, not pure noise
+    yy, xx = np.mgrid[0:300, 0:400]
+    base = np.stack([xx / 400, yy / 300, 0.5 + 0.3 * np.sin(xx / 30)], -1)
+    src8 = (np.clip(base + rng.normal(0, 0.01, base.shape), 0, 1) * 255).astype(np.uint8)
+    rgb16 = (srgb_to_linear(src8.astype(np.float32) / 255) * 65535).astype(np.uint16)
+
+    def lr(p):
+        with rawpy.imread(p) as r:
+            return r.postprocess(output_bps=16, no_auto_bright=True, gamma=(1, 1),
+                                 use_camera_wb=True).astype(np.float32) / 65535
+
+    ref, out = str(tmp_path / "ref.dng"), str(tmp_path / "out.dng")
+    write_linear_dng(ref, rgb16, compression="none")
+    write_linear_dng(out, rgb16, compression="ljpeg", bit_depth=bit_depth)
+    err = np.abs(linear_to_srgb(lr(out)) - linear_to_srgb(lr(ref))) * 255
+    assert err.max() <= max_err_steps
+    assert os.path.getsize(out) < os.path.getsize(ref)
+
+
+def test_ljpeg_falls_back_to_uncompressed_without_imagecodecs(tmp_path, monkeypatch):
+    """Missing imagecodecs must degrade to a valid uncompressed file with a
+    warning -- never crash the run (that crash happened once, for the preview)."""
+    import builtins
+    real_import = builtins.__import__
+    def fake_import(name, *a, **k):
+        if name == "imagecodecs":
+            raise ModuleNotFoundError("No module named 'imagecodecs'")
+        return real_import(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", fake_import)
     rgb16 = (np.random.default_rng(0).random((64, 64, 3)) * 65535).astype(np.uint16)
     out = str(tmp_path / "out.dng")
-    write_linear_dng(out, rgb16, compress=True)
-
-    with pytest.raises(Exception):
-        with rawpy.imread(out) as raw:
-            raw.postprocess()
+    write_linear_dng(out, rgb16)  # default ljpeg must not raise
+    with tifffile.TiffFile(out) as tf:
+        assert main_page(tf).compression == 1
+    assert np.array_equal(main_array(out), rgb16)
 
 
 # ---- decode.py: chroma subsampling + per-channel quality ----
@@ -396,13 +432,14 @@ def _dng_validate_bin():
 @pytest.mark.skipif(_dng_validate_bin() is None,
                     reason="Adobe dng_validate not available (build: tools/build_dng_validate.sh)")
 @pytest.mark.parametrize("write_preview", [True, False])
-def test_dng_passes_adobe_dng_validate(tmp_path, write_preview):
+@pytest.mark.parametrize("compression,bit_depth", [("none", 16), ("ljpeg", 16), ("ljpeg", 12), ("ljpeg", 10)])
+def test_dng_passes_adobe_dng_validate(tmp_path, write_preview, compression, bit_depth):
     """Strictest check available: Adobe's own reference validator must
     report no errors AND no warnings, for both layouts."""
     import subprocess
     rgb16 = (np.random.default_rng(0).random((128, 128, 3)) * 65535).astype(np.uint16)
     out = str(tmp_path / "out.dng")
-    write_linear_dng(out, rgb16, write_preview=write_preview)
+    write_linear_dng(out, rgb16, write_preview=write_preview, compression=compression, bit_depth=bit_depth)
     r = subprocess.run([_dng_validate_bin(), out], capture_output=True, text=True)
     text = r.stdout + r.stderr
     assert "*** Error" not in text and "*** Warning" not in text, text

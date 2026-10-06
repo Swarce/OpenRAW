@@ -56,18 +56,12 @@ def main() -> int:
     )
     p.add_argument("--invisp-pretrained-dir", default="pretrained")
     p.add_argument("--invisp-device", default="cpu", help="'cpu' or 'cuda:0' etc.")
-    p.add_argument(
-        "--compress",
-        action="store_true",
-        help=(
-            "Write Deflate-compressed DNG (smaller, but CONFIRMED via real libraw "
-            "testing to be unreadable by libraw-based tools -- darktable, RawTherapee, "
-            "etc. Default is uncompressed, which is larger but works everywhere tested. "
-            "Only use this if you've verified your specific target reader supports it. "
-            "See dng_writer.py's write_linear_dng docstring."
-        ),
-    )
-    p.add_argument("--compression-level", type=int, default=9, help="1 (fastest) - 9 (smallest), only applies with --compress")
+    p.add_argument("--compression", choices=["ljpeg", "none"], default="ljpeg",
+                   help="ljpeg (default): lossless-JPEG tiles, verified in Adobe's DNG SDK and libraw. "
+                        "none: uncompressed, largest.")
+    p.add_argument("--bit-depth", type=int, choices=[16, 14, 12, 10], default=12,
+                   help="ljpeg only. 12 (default) ~half the size of uncompressed with error <=1/20 of a "
+                        "source 8-bit step; 10 is smaller still (<=1/7 step); 16 is bit-exact.")
     p.add_argument("--no-exif", action="store_true", help="don't carry camera metadata (Make/Model/lens/exposure/etc) from the source JPEG into the DNG. GPS is never carried -- dropped entirely, see exif_transfer.py")
     p.add_argument("--no-preview", action="store_true", help="skip the small JPEG preview IFD (just the main full-res image, no quick-look thumbnail)")
     p.add_argument("--preview-max-dim", type=int, default=1024)
@@ -86,8 +80,8 @@ def main() -> int:
         invisp_camera=args.invisp_camera,
         invisp_pretrained_dir=args.invisp_pretrained_dir,
         invisp_device=args.invisp_device,
-        dng_compress=args.compress,
-        dng_compression_level=args.compression_level,
+        dng_compression=args.compression,
+        dng_bit_depth=args.bit_depth,
         preserve_exif=not args.no_exif,
         write_preview=not args.no_preview,
         preview_max_dim=args.preview_max_dim,
