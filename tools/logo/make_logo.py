@@ -8,7 +8,7 @@ Aperture construction: N lines, each extending one side of a regular
 N-gon (the lens opening) outward to the rim. Those lines, drawn as gaps,
 split the disk into N pinwheel blades.
 
-Lettering: IBM Plex Sans (SIL Open Font License, see fonts/OFL-IBMPlexSans.txt), shaped
+Lettering: Saira (SIL Open Font License, see fonts/OFL-Saira.txt), shaped
 with HarfBuzz for real kerning and converted to outlines, so the SVGs
 render identically without the font installed.
 
@@ -58,11 +58,19 @@ _font_cache: dict = {}
 
 # Wordmark typeface. Any variable TTF works; every axis except weight is
 # pinned (optical size, if present, to its display end).
-FONT = HERE / "fonts" / "IBMPlexSans[wdth,wght].ttf"
+FONT = HERE / "fonts" / "Saira[wdth,wght].ttf"
 
 
-def _instance(wght: float, font: Path | None = None):
-    font = Path(font or FONT)
+def _instance(wght: float, font=None):
+    """font: a variable TTF path, or a dict {weight: static TTF path}."""
+    font = font or FONT
+    if isinstance(font, dict):  # static family: pick the closest weight's file
+        path = Path(font[min(font, key=lambda w: abs(w - wght))])
+        key = (str(path), None)
+        if key not in _font_cache:
+            _font_cache[key] = (TTFont(path), hb.Font(hb.Face(hb.Blob(path.read_bytes()))), path)
+        return _font_cache[key]
+    font = Path(font)
     key = (str(font), wght)
     if key not in _font_cache:
         vf = TTFont(font)
@@ -130,10 +138,21 @@ def text_geometry(runs, size: float, x: float, y: float, font=None):
         for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
             pen = _FlatPen(gs)
             gs[order[info.codepoint]].draw(pen)
+            # Nonzero winding: contours wound like the largest one are fills,
+            # opposite-wound ones are counters. (XOR, used at first, punched
+            # holes wherever two fill contours OVERLAP -- common in variable
+            # fonts; Exo 2's "A" lost a chunk.)
             glyph = None
-            for c in pen.contours:  # XOR of contours = outer shapes minus counters
-                poly = Polygon(c).buffer(0)
-                glyph = poly if glyph is None else glyph.symmetric_difference(poly)
+            if pen.contours:
+                def signed_area(c):
+                    return 0.5 * sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(c, c[1:] + c[:1]))
+                areas = [signed_area(c) for c in pen.contours]
+                outer_sign = 1 if areas[max(range(len(areas)), key=lambda k: abs(areas[k]))] > 0 else -1
+                fills = [Polygon(c).buffer(0) for c, a in zip(pen.contours, areas) if a * outer_sign > 0]
+                holes = [Polygon(c).buffer(0) for c, a in zip(pen.contours, areas) if a * outer_sign < 0]
+                glyph = unary_union(fills)
+                if holes:
+                    glyph = glyph.difference(unary_union(holes))
             if glyph is not None:
                 # font units (y up) -> logo units (y down)
                 ox, oy = pen_x + pos.x_offset * s, y - pos.y_offset * s
@@ -207,7 +226,13 @@ def lockup_layers(ink, core, runs, size=36.0, halo=5.4, baseline=63.0, font=None
     mid = baseline - size * 0.35                      # optical middle of the caps
     rim_x = math.sqrt(max(RING_OUTER ** 2 - mid ** 2, 0))
     words, _ = text_geometry(runs, size, rim_x - w / 2, baseline, font)
-    halo_shape = unary_union(words).buffer(halo, join_style="round")
+    # Fill letter counters (the holes in O, p, e, R, A) before growing the
+    # halo: otherwise the aperture shows THROUGH wide counters, and a blade
+    # gap line crossing Saira's O read like a slashed zero.
+    def _solid(g):
+        polys = [g] if g.geom_type == "Polygon" else list(g.geoms)
+        return unary_union([Polygon(p.exterior) for p in polys if p.geom_type == "Polygon"])
+    halo_shape = unary_union([_solid(w) for w in words]).buffer(halo, join_style="round")
     ap = aperture_geometry(core)
     layers = [(ap["ink"].difference(halo_shape), ink)]
     layers += [(ap[c].difference(halo_shape), BAYER[c]) for c in ("R", "G", "B") if c in ap]

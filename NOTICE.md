@@ -131,11 +131,11 @@ existing paired RAW/JPEG research datasets with their own usage terms
 (e.g. MIT-Adobe FiveK, NUS, RAISE — the same datasets InvISP itself
 trains on), not scraped web images.
 
-## Logo font: IBM Plex Sans (SIL Open Font License 1.1)
+## Logo font: Saira (SIL Open Font License 1.1)
 
-The wordmark in `assets/logo/` is set in **IBM Plex Sans**, Copyright © 2017
-IBM Corp., with Reserved Font Name "Plex" — converted to outlines by
-`tools/logo/make_logo.py` (the font itself is unmodified). The font file
-and its license are included at `tools/logo/fonts/`
-(`OFL-IBMPlexSans.txt`). The aperture artwork is original, constructed
+The wordmark in `assets/logo/` is set in **Saira** (Copyright 2020 The Saira
+Project Authors, https://github.com/Omnibus-Type/Saira), converted to
+outlines by `tools/logo/make_logo.py` (the font itself is unmodified). The
+font file and its license are included at `tools/logo/fonts/`
+(`OFL-Saira.txt`). The aperture artwork is original, constructed
 geometrically by the same script.
