@@ -119,3 +119,14 @@ def test_threaded_tile_encoding_is_byte_identical(tmp_path):
         write_linear_dng(str(p), x, threads=t)
         digests.add(hashlib.sha256(p.read_bytes()).hexdigest())
     assert len(digests) == 1
+
+
+def test_version_reports_package_and_libraries(capsys):
+    """Bug reports need library versions -- nearly every bug so far was
+    version-dependent. Also handled before argparse, so it needs no inputs."""
+    from pseudoraw import __version__
+    assert main(["--version"]) == 0
+    out = capsys.readouterr().out
+    assert f"pseudoraw {__version__}" in out
+    for lib in ("numpy", "tifffile", "imagecodecs"):
+        assert lib in out

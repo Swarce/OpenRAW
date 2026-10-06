@@ -75,7 +75,7 @@ def _preview_write_kwargs(quality: int) -> tuple[dict, str | None]:
     in), with no fallback. On any machine without imagecodecs already
     installed for some unrelated reason, this crashed the ENTIRE
     pipeline run -- not a degraded preview, a total failure, just to
-    produce a thumbnail. imagecodecs is now a real requirements.txt
+    produce a thumbnail. imagecodecs is now a declared (pyproject.toml)
     dependency, but a missing optional-feeling C-extension package
     souldn't be able to take down the whole tool: this checks up front
     and falls back to an uncompressed preview (still small -- it's
@@ -99,7 +99,7 @@ def _preview_write_kwargs(quality: int) -> tuple[dict, str | None]:
         return (
             dict(photometric="rgb", compression=None),
             f"preview: JPEG compression unavailable ({type(e).__name__}: {e}) "
-            f"-- install 'imagecodecs' (see requirements.txt) for a smaller "
+            f"-- install/upgrade 'imagecodecs' for a smaller "
             f"preview. Falling back to an uncompressed preview for now; the "
             f"main image is unaffected.",
         )
@@ -199,7 +199,7 @@ def _main_image_payload(rgb16: np.ndarray, compression: str, bit_depth: int, thr
                                  bitspersample=bit_depth, colorspace="RGB", outcolorspace="RGB")
     except Exception as e:
         print(f"[pseudoraw] lossless JPEG unavailable ({type(e).__name__}: {e}) -- install/upgrade "
-              f"'imagecodecs' (requirements.txt). Writing UNCOMPRESSED (larger, still valid) instead.")
+              f"'imagecodecs' (>=2023.9.18). Writing UNCOMPRESSED (larger, still valid) instead.")
         return rgb16, {}, []
     raw_tags = []
     if bit_depth == 16:

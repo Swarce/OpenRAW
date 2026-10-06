@@ -1,8 +1,0 @@
-# Only needed for data/data_preprocess.py (turning downloaded FiveK DNGs
-# into RAW/.npz + RGB/.jpg training pairs). Not needed for cli.py at all,
-# classical or --invisp.
-
-rawpy>=0.18          # DNG decode, camera white balance, black/white levels
-colour-demosaicing>=0.2   # bilinear CFA demosaicing (PyPI name has a hyphen; import name has an underscore)
-numpy>=1.24
-pillow>=10.0

@@ -38,7 +38,7 @@ wget -P Canon_EOS_5D/DNG -i Canon_EOS_5D_test.txt
 ## Preprocess (RAW DNG -> training pairs)
 
 ```bash
-pip install -r ../requirements-dataprep.txt
+pip install "..[dataprep]"      # i.e. pip install ".[dataprep]" from the repo root
 cd data
 python3 data_preprocess.py --camera NIKON_D700
 python3 data_preprocess.py --camera Canon_EOS_5D
@@ -75,7 +75,7 @@ value immediately overwritten by checkpoint loading, provably harmless.
 This one changes what numbers the Canon training data actually contains
 (whether a 127-level black-point offset gets subtracted before
 demosaicing) -- a real algorithmic choice, not a compatibility shim, and
-not mine to make silently. If you fix the string, you're changing the
+not one to make silently. Fixing the string means changing the
 training distribution slightly from what `canon.pth` itself was (likely
 unintentionally) trained on. Worth deciding deliberately, not inheriting
 by accident.

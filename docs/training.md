@@ -1,14 +1,14 @@
 # Training InvISP on FiveK — quickstart
 
-This is the real workflow, start to finish. Everything here was tested
-as far as this sandbox allows (no GPU here — see "What's verified vs
-not" at the bottom) and patched where it was actually broken, not
-rewritten for style.
+The full workflow, start to finish. The upstream scripts were patched only
+where they were actually broken (listed below), not rewritten for style.
+An actual training step has not yet been run end to end — see "What's
+verified vs not" at the bottom.
 
 ## 1. Get the data
 
-You're downloading the full FiveK set directly from Adobe/MIT. Worth
-knowing: `train.py` (below) only ever trains ONE camera at a time, and
+Download MIT-Adobe FiveK from Adobe/MIT (the full set, or just the
+subset in `data/`). Worth knowing: `train.py` (below) only ever trains ONE camera at a time, and
 out of the box only has train/test splits for the same two cameras
 `canon.pth`/`nikon.pth` already cover (Canon EOS 5D, Nikon D700) — see
 `data/README.md`. Downloading the full 5,000-image set is still useful:
@@ -28,7 +28,7 @@ both key off them).
 ## 2. Preprocess: DNG -> training pairs
 
 ```bash
-pip install -r requirements-dataprep.txt
+pip install ".[dataprep]"
 cd data
 python3 data_preprocess.py --camera NIKON_D700
 python3 data_preprocess.py --camera Canon_EOS_5D
@@ -49,7 +49,7 @@ trained on.
 ## 3. Train
 
 ```bash
-pip install -r requirements-training.txt
+pip install ".[training]"
 python3 train.py --task my_nikon_run --camera NIKON_D700 --gamma --aug
 ```
 
@@ -98,12 +98,12 @@ necessary to run, document inline, never silently.
 - **Two genuinely dead imports** (`torchvision`, `rawpy` in
   `dataset/FiveK_dataset.py`) left completely untouched in the vendored
   file (neither is actually referenced anywhere in it) — just documented
-  in `requirements-training.txt` so you install them anyway, since the
+  in the `[training]` extra so they get installed anyway, since the
   import itself still needs to succeed even if nothing uses them.
 
 ## What's verified vs not, stated plainly
 
-Verified in this environment (torch installed, no GPU):
+Verified so far (torch installed, no GPU):
 - Every import in `train.py`'s chain resolves correctly, including the
   patched paths — confirmed by running it and watching it fail exactly
   and only at the explicit CUDA check, nothing earlier or cryptic.
@@ -111,8 +111,7 @@ Verified in this environment (torch installed, no GPU):
   loss) actually constructs and runs a forward pass correctly on CPU.
 - `dataset/FiveK_dataset.py` imports cleanly post-patch (the imread fix).
 
-NOT verified here, because it needs a real GPU and real downloaded data,
-neither of which this sandbox has:
+NOT verified yet, because it needs a real GPU and downloaded data:
 - An actual training step (forward + backward + optimizer step) has
   never run.
 - `FiveKDatasetTrain`/`FiveKDatasetTest`'s `__getitem__` (the actual
@@ -121,6 +120,6 @@ neither of which this sandbox has:
 - Multi-epoch training stability, loss curves, checkpoint quality —
   none of that can be assessed without actually training.
 
-First real thing to do once you're training: run with `--debug_mode`
+First thing to do when training: run with `--debug_mode`
 first (10 images, fast) to confirm the whole pipeline actually executes
 end to end on your machine before committing to a full run.

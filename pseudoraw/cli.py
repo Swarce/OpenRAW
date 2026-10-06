@@ -28,11 +28,34 @@ from .pipeline import PipelineConfig, PseudoRawPipeline
 JPEG_EXTS = {".jpg", ".jpeg"}
 
 
+def _version_report() -> str:
+    """Package + key library versions: almost every bug this project has hit
+    was library-version-dependent, so bug reports should include this."""
+    import platform
+    from . import __version__
+    lines = [f"pseudoraw {__version__} (OpenRAW)", f"python {platform.python_version()} on {platform.system()} {platform.machine()}"]
+    for mod in ("numpy", "cv2", "PIL", "tifffile", "imagecodecs", "rawpy", "torch"):
+        try:
+            m = __import__(mod)
+            v = getattr(m, "__version__", "?")
+            if mod == "imagecodecs":
+                try:
+                    v += f" ({m.jpeg8_version()})"
+                except Exception:
+                    pass
+            lines.append(f"{mod} {v}")
+        except Exception:
+            lines.append(f"{mod} not installed")
+    return "\n".join(lines)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="pseudoraw",
         description="Reconstruct pseudo-RAW linear DNGs from JPEGs (part of the OpenRAW project).",
     )
+    p.add_argument("--version", action="store_true",
+                   help="show package and library versions (include this in bug reports)")
     p.add_argument("inputs", nargs="+", help="JPEG files and/or folders")
     p.add_argument("-o", "--output", help="output folder (or output .dng when converting exactly one file)")
     p.add_argument("-r", "--recursive", action="store_true", help="search folders recursively (output mirrors the tree)")
@@ -186,6 +209,9 @@ def _print_detail(r: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if "--version" in argv:  # handled before argparse: lazy (imports torch etc.) and keeps line breaks
+        print(_version_report())
+        return 0
     # Legacy form: `pseudoraw in.jpg out.dng` (two positionals, second a .dng).
     if len(argv) >= 2 and not argv[1].startswith("-") and argv[1].lower().endswith(".dng") \
             and "-o" not in argv and "--output" not in argv:

@@ -64,8 +64,8 @@ def _require_torch():
     except ImportError as e:
         raise ImportError(
             "invisp_bridge needs PyTorch, which isn't installed. "
-            "pip install -r requirements-invisp.txt (torch is kept out of "
-            "the base requirements.txt since the classical deterministic "
+            "pip install 'pseudoraw[invisp]' (torch is kept out of the "
+            "base install since the classical deterministic "
             "pipeline in cli.py doesn't need it)."
         ) from e
     return torch

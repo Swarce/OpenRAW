@@ -29,11 +29,11 @@ from pseudoraw.third_party.invisp.utils.JPEG import DiffJPEG
 # on any machine where nvidia-smi isn't on PATH in exactly the expected
 # form, or where CUDA isn't available at all. Same behavior when it
 # works, a clear error instead of a cryptic one when it can't -- see
-# TRAINING.md for what this means on your actual machine.
+# docs/training.md for what this means on your actual machine.
 if not torch.cuda.is_available():
     raise RuntimeError(
         "No CUDA GPU available (torch.cuda.is_available() is False). "
-        "This training script trains on GPU only -- see TRAINING.md."
+        "This training script trains on GPU only -- see docs/training.md."
     )
 try:
     os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')

@@ -1,0 +1,43 @@
+# Changelog
+
+All notable changes. Development history before the first release is
+summarized; commit messages carry the full detail and measurements.
+
+## [Unreleased] — 0.1.0.dev0
+
+### Added
+- **Batch conversion**: files and folders, `-r` recursive with mirrored
+  output tree, `--jobs` for parallel files. Re-runs skip finished outputs
+  (`--overwrite` to redo), a failing file never stops the batch, and
+  interrupted runs never leave truncated DNGs.
+- **Lossless-JPEG DNG compression** (tiled, 3-component) with a DNG
+  LinearizationTable at 12-bit by default: ~50 MB instead of ~108 MB for an
+  18 MP photo. `--bit-depth 16/14/12/10`, `--compression none`.
+- Multithreaded tile encoding (`--threads`), byte-identical at any count.
+- Embedded JPEG preview in the standard preview + SubIFD layout.
+- Camera EXIF passthrough (make, model, lens, exposure, ISO, focal length,
+  orientation, capture time). Never fabricated when absent; GPS never copied.
+- Packaging: `pyproject.toml`, `pseudoraw` command, extras `[invisp]`,
+  `[dataprep]`, `[training]`, `[dev]`. `pseudoraw --version` reports key
+  library versions for bug reports.
+- CI on Linux/Windows/macOS, with Adobe's `dng_validate` and a clean-venv
+  wheel install; `tools/build_dng_validate.sh` to run the validator locally.
+- Optional InvISP (CVPR 2021) learned path, `--invisp`, with vendored
+  upstream code and official checkpoints; training scaffolding for FiveK.
+
+### Fixed
+- DNGs rejected by Adobe-SDK readers (Android/Skia, Luminar): `DNGVersion`
+  and other identity tags had ended up outside IFD0.
+- Debanding softened whole images (~40% measured detail loss); its
+  correction is now clamped to one source quantization step.
+- Deflate-compressed DNGs were unreadable by libraw (replaced by
+  lossless JPEG).
+- Spurious `ExtraSamples` tag and a `StopIteration` crash, both caused by
+  tifffile-version-dependent handling of LinearRaw; output is now
+  byte-identical across tifffile versions.
+- Missing `imagecodecs` crashed the whole run; it's now a declared
+  dependency and the writer falls back to uncompressed output if absent.
+- Decoder read quantization tables/EXIF after color conversion, losing them
+  for non-RGB JPEGs.
+- Rational EXIF values (e.g. f-number) were corrupted when given as plain
+  integers.

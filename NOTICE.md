@@ -40,7 +40,7 @@ orthogonal matrix that `load_state_dict()` immediately overwrites from
 the checkpoint in every real use of this class, so the change cannot
 affect correctness. `torch.lu`/`torch.lu_unpack` a few lines below are
 untouched — deprecated-with-a-warning but still functional on 2.14.1, so
-no reason to touch what isn't broken yet (`requirements-invisp.txt` still
+no reason to touch what isn't broken yet (`docs/invisp.md` still
 flags them as a future risk).
 
 **Also vendored (added when sourcing training data, not in the initial
@@ -54,7 +54,7 @@ unpatched rather than silently "corrected" — see that file for why.
 
 **Also vendored (added for actual training): `train.py`, `dataset/`
 (`FiveK_dataset.py`, `base_dataset.py`), `config/config.py`.** See
-[`TRAINING.md`](TRAINING.md) for the full workflow and three real fixes
+[`docs/training.md`](docs/training.md) for the full workflow and three real fixes
 applied to get this running at all (not cosmetic): `train.py`'s import
 paths patched to match this repo's layout (`model`/`utils` live under
 `pseudoraw/third_party/invisp/` here, not top-level as in upstream); `train.py`'s

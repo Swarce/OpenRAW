@@ -1,256 +1,102 @@
-# pseudoraw (POC)
+# OpenRAW
 
-Reconstructs a **linear DNG** from a JPEG: not real sensor RAW data (that's
-impossible — see below), but a 16-bit linear reconstruction with deblocking,
-chroma refinement, tone-curve inversion, and dithered/debanded bit-depth
-expansion, giving raw-capable editors (Lightroom, darktable, Capture One,
-RawTherapee) more grading headroom than the baked JPEG had.
+**Turn JPEGs into editable linear DNGs** — more room to push exposure,
+shadows, and colors in Lightroom, Luminar, darktable, RawTherapee, or any
+raw editor, from cameras and phones that never gave you a raw file.
 
-## Why this can't be "real RAW recovery," and what it is instead
+> **Status: alpha.** Usable and tested, but young. The Python package and
+> command are currently named `pseudoraw`.
 
-JPEG throws away information in ways that are genuinely unrecoverable:
-8-bit quantization, baked tone curve, chroma subsampling, DCT quantization,
-and (for real cameras) a sensor-specific demosaic + color pipeline that's
-long gone by the time you have a JPEG. No amount of processing — classical
-or ML — gets that back. Any tool claiming to "restore your RAW" from a JPEG
-is overselling.
+## What it is — and what it isn't
 
-What *is* real and useful: redistributing the error that's already there
-instead of hiding it. An 8-bit JPEG pushed hard in post shows ugly banding
-and blocking because the baked tone curve and lossy compression concentrated
-all its precision in the midtones and threw the rest away. Decompressing
-that into a dithered, debanded, deblocked 16-bit linear file doesn't add
-back missing highlight/shadow detail, but it does mean the degradation you
-already have shows up as fine grain instead of hard edges when you push it —
-which is a legitimate, measurable improvement (see `tests/` for a literal
-"more distinguishable tonal levels than the 8-bit source" check).
+A JPEG has already thrown information away: it's 8-bit, compressed, and
+has the camera's tone curve and color baked in. **No tool can recover the
+original sensor data from it**, and OpenRAW doesn't pretend to.
 
-**Every stage is written to say, in its own docstring, exactly how
-confident it is** — which steps are exact invertible math (sRGB gamma
-removal) vs. defensible-but-approximate signal processing (deblocking,
-debanding) vs. openly speculative/experimental and off by default (generic
-contrast-curve removal, gamut widening). Read `pseudoraw/*.py` — the
-docstrings are as much the documentation of this project's honesty as the
-code is of its mechanism.
+What it does is rebuild the JPEG into the form a raw editor works best
+with: **16-bit linear light**, with compression artifacts cleaned up and
+banding smoothed, packaged as a standard DNG. When you push the edit hard,
+the damage that was already in the JPEG shows up as fine, natural grain
+instead of hard banding and blocky steps — and you get your raw editor's
+full toolset (white balance, highlight/shadow recovery, curves) working
+on linear data instead of a baked image.
 
-## Pipeline
+![Synthetic quality-15 JPEG: left as-is, right after OpenRAW's deblocking](examples/deblock_comparison.png)
 
-```
-JPEG
-  │  decode.py      — Pillow decode + read the embedded quant tables
-  │                    (used to estimate how lossy this specific JPEG was)
-  ▼
-deblock.py           — edge-aware guided-filter deblocking, strength driven
-  │                     by the real quality estimate, not a fixed amount
-  ▼
-chroma.py             — re-sharpen chroma planes against the luma guide
-  │                      (see its docstring for an important limitation:
-  │                      Pillow hands us already-upsampled chroma, so this
-  │                      is refinement, not true subsampled-plane recovery)
-  ▼
-tonecurve.py           — exact sRGB EOTF inversion -> scene-linear
-  │                       (+ optional, off-by-default generic S-curve undo)
-  ▼
-colormatrix.py          — NOT a fabricated sensor-gamut inverse. Declares
-  │                        the "virtual sensor" native space to honestly be
-  │                        linear sRGB, and writes the exact matching matrix.
-  ▼
-bitdepth.py               — 8->16 bit expansion: amplitude-matched triangular
-  │                          dithering + gradient-gated debanding smoothing
-  ▼
-dng_writer.py               — real Linear DNG tags via tifffile (not a
-                               renamed TIFF) — DNGVersion, ColorMatrix1,
-                               CalibrationIlluminant1, WhiteLevel/BlackLevel,
-                               AsShotNeutral, PhotometricInterpretation=
-                               LinearRaw(34892)
-```
+*Synthetic test image saved at JPEG quality 15 — left: blocking left in;
+right: after OpenRAW's cleanup. Real photos saved at normal quality have far
+milder artifacts; there, the main gain is the 16-bit linear headroom. See
+[docs/how-it-works.md](docs/how-it-works.md).*
 
-(`pseudoraw/ml/` — the InvISP-based invertible network — is groundwork
-for replacing the deblock/chroma stages above; it is not wired into this
-pipeline yet. See "ML groundwork" below.)
+## Install
 
-## Install & run
+Requires Python 3.10+. Until there's a PyPI release:
 
 ```bash
-pip install -r requirements.txt   # opencv-contrib-python is required, not
-                                   # plain opencv-python -- we need ximgproc
-
-python3 cli.py input.jpg output.dng
+git clone https://github.com/Swarce/OpenRAW.git
+cd OpenRAW
+pip install .
 ```
 
-Options:
+> If you already have `opencv-python` installed in the same environment,
+> uninstall it first — it clashes with the `opencv-contrib-python-headless`
+> package OpenRAW needs. A fresh virtual environment avoids this entirely.
 
+## Use
+
+```bash
+pseudoraw photo.jpg                     # -> photo.dng next to it
+pseudoraw photo.jpg -o edited/          # into a folder
+pseudoraw ~/Pictures/trip -r -o dngs/   # a whole folder tree, structure kept
+pseudoraw ~/Pictures/trip -r --jobs 2   # two photos at a time
 ```
---no-deblock              disable the deblocking stage
---no-chroma-refine        disable chroma refinement
---chroma-strength FLOAT   default 0.6
---s-curve FLOAT           EXPERIMENTAL generic contrast-curve removal,
-                           off by default (0). try 0.1-0.4 if you want it.
---gamut-widen FLOAT       EXPERIMENTAL gamut widening -- a creative look,
-                           not a reconstruction step. off by default (0).
---no-dither / --no-deband
-```
 
-## Real InvISP integration: `third_party/invisp/` + `pseudoraw/invisp_bridge.py`
+Batch runs are safe to interrupt and re-run: finished files are skipped
+(use `--overwrite` to redo them), a broken file is reported without
+stopping the rest, and a half-written DNG is never left behind.
 
-This project vendors actual source code from **InvISP (CVPR 2021)** —
-not a reimplementation — and wires it up with InvISP's own official
-pretrained checkpoints. Full attribution, exactly what was vendored vs.
-written fresh, and checkpoint provenance (md5-verified against upstream)
-are in [`NOTICE.md`](NOTICE.md). Summary:
+### File size
 
-- `third_party/invisp/` — vendored, unmodified: `model/model.py`
-  (`InvISPNet`, `InvBlock` — the real 1-vs-2-channel affine coupling with
-  a *learnable* invertible 1×1 conv per block, not the Haar-doubling
-  scheme an earlier version of this README described before the real
-  source was available), `model/modules.py`, the differentiable JPEG
-  simulator (`utils/JPEG*.py`, `utils/compression.py`,
-  `utils/decompression.py`), and upstream's own `LICENSE`.
-- `pretrained/canon.pth`, `pretrained/nikon.pth` — InvISP's own official
-  checkpoints, one per camera (Canon EOS 5D / Nikon D700, both from
-  MIT-Adobe FiveK).
-- `pseudoraw/invisp_bridge.py` — **our own new code**, not vendored:
-  loads a checkpoint, runs `net(x, rev=True)` on a decoded JPEG, and
-  undoes the gamma compression upstream's `--gamma` training flag bakes
-  into the "RAW" side of the network (see the module docstring — this
-  part is unintuitive and easy to get wrong silently, so it's spelled
-  out there in full) before handing scene-linear data to the same
-  `bitdepth.py` / `dng_writer.py` stages the classical path uses.
+DNGs are bigger than JPEGs — they hold far more precision. Defaults keep
+an 18 MP photo around **50 MB**:
 
-Run it: `python3 cli.py input.jpg output.dng --invisp --invisp-camera NIKON_D700`
-(needs `pip install -r requirements-invisp.txt`).
-
-**Update: this has now actually been run**, end to end, on real torch
-(2.14.1, CPU) — construct the real `InvISPNet`, load the real
-`nikon.pth`, run `net(x, rev=True)` on a decoded JPEG, undo the gamma,
-write a compressed Linear DNG. It was not a clean first run: constructing
-the model hit `torch.qr`, which current PyTorch has removed outright (not
-just deprecated — see `NOTICE.md` for the one-line patch, which doesn't
-touch anything `load_state_dict()` doesn't immediately overwrite anyway).
-With that fixed, output is finite, non-degenerate, visibly coherent
-(see `examples/` for a rendered preview), and pinned by
-`tests/test_pipeline.py::test_invisp_path_runs_real_network_and_writes_valid_dng`,
-which actually exercises the real network and real checkpoint rather than
-mocking around them. `requirements-invisp.txt` still flags `torch.lu`/
-`torch.lu_unpack` (used a few lines below the patched call) as a future
-risk — deprecated-with-a-warning but functional on 2.14.1, left alone
-since there's no reason to patch what isn't broken yet.
-
-One thing worth being honest about even with it running: colors come out
-visibly different from the classical path's output — more muted/shifted,
-since this is the network's learned approximation of Nikon D700 sensor-
-native color response, not an sRGB-preserving transform. That's expected
-behavior, not a bug, but it means the two `cli.py` paths are not
-drop-in equivalents of each other, just two different approaches to the
-same goal.
-
-A separate, now-superseded NumPy reimplementation of InvISP's general
-architectural idea (built before the real source was available) still
-lives in `pseudoraw/ml/` — see its docstring and `NOTICE.md` for why it's
-kept around (its invertibility tests are still a legitimate from-scratch
-demo) despite not being the path forward anymore.
-
-## Training: `TRAINING.md`
-
-Full workflow (download -> preprocess -> train -> use the result), the
-real bugs found and fixed in upstream's own `train.py`/dataset loader
-(not cosmetic — these blocked it from running at all), and what's been
-verified here (imports, `DiffJPEG`'s forward pass) vs. what still needs
-a real GPU to confirm (an actual training step has never run).
-
-## Training data: `data/`
-
-The exact Canon EOS 5D + Nikon D700 MIT-Adobe FiveK subset InvISP's own
-checkpoints were trained on — 1,264 images, ~11.7 GB (not the full
-5,000-image / 47.34 GB FiveK set). See [`data/README.md`](data/README.md)
-for download commands, a smaller 200-image/~1.9GB test-split-only option
-to start with, and a real bug found (not fixed) in the vendored
-preprocessing script.
-
-## What's genuinely demonstrated by this POC
-
-- A real, valid Linear DNG that opens in **real libraw** (via `rawpy`),
-  not just round-trips through `tifffile` (which wrote the file — that
-  it reads its own output back is necessary but was NOT sufficient: see
-  the compression finding below for exactly how that gap shipped a real
-  bug). Confirmed with an actual `raw.postprocess()` call, not just an
-  open. Tags verified too: photometric interpretation, color matrix,
-  calibration illuminant, white/black level, hue identity of saturated
-  test patches survives the full pipeline, no spurious ExtraSamples tag.
-- A **preview + SubIFD structure** (small JPEG preview as IFD0, full-res
-  LinearRaw data in a SubIFD per DNG's own recommended layout) so
-  quick-look viewers and raw-import screens have something to show
-  without a full raw decode — added after a bug report's file turned out
-  to have neither a working compressed main image nor any preview at all.
-- Measurable deblocking on a low-quality (q15) synthetic JPEG — see
-  `examples/deblock_comparison.png`, generated from the test image in
-  this repo.
-- Measurable increase in distinguishable tonal levels across a gradient
-  after dithering (`tests/test_pipeline.py::test_bitdepth_expansion_increases_tonal_resolution`).
-
-**Compression, and how we got here.** Output uses **lossless-JPEG tiles**
-(the predictive lossless codec real cameras use for raw -- not the lossy
-DCT JPEG used for photos) plus, by default, a 12-bit DNG
-**LinearizationTable**. On a real 4896x3672 photo:
-
-| `--compression` / `--bit-depth` | size | error vs. bit-exact |
+| Option | ~Size (18 MP) | Precision |
 |---|---|---|
-| `none` | 108 MB | none |
-| `ljpeg` / `16` | 76 MB | none (bit-exact, verified) |
-| `ljpeg` / `14` | 64 MB | <= 0.02 source steps |
-| `ljpeg` / `12` **(default)** | 50 MB | <= 0.06 source steps |
-| `ljpeg` / `10` | 37 MB | <= 0.16 source steps |
+| `--bit-depth 16` | 76 MB | bit-exact |
+| `--bit-depth 12` *(default)* | 50 MB | within 1/20 of a JPEG tonal step |
+| `--bit-depth 10` | 37 MB | within 1/7 of a JPEG tonal step |
+| `--compression none` | 108 MB | bit-exact, uncompressed |
 
-"Source steps" = the input JPEG's own 8-bit quantization steps, so even 10-bit
-stays several times finer than the source. Every mode passes Adobe's reference
-`dng_validate` with zero errors/warnings and decodes correctly in BOTH Adobe's
-DNG SDK and libraw (measured, and pinned by tests). For scale: the source's own
-8-bit pixels with zero headroom need ~24 MB losslessly; a 6 MB JPEG is only that
-small because it discards information.
+All of these are lossless-JPEG-compressed DNGs (the same compression real
+cameras use for raw), verified in both Adobe's DNG SDK and libraw.
 
-Dead ends, documented so nobody repeats them: Deflate/LZW/PackBits (libraw
-rejects all three for this structure -- an earlier version of this README
-wrongly claimed Deflate was "widely supported"), lossy DCT JPEG (~30000/65535
-mean error on 16-bit data), and a single-component "W x 3 wide" LJPEG layout
-(passes Adobe's SDK, but libraw scrambles pixels inside every tile).
+### Metadata
 
-## What's explicitly NOT yet done (the honest backlog)
+Camera and lens info from the JPEG (make, model, lens, aperture, shutter,
+ISO, focal length, orientation, capture time) is carried into the DNG when
+present — never invented when absent. **GPS location is never copied.**
 
-1. **No learned model yet.** `deblock.py` and `chroma.py` are classical
-   heuristics, clearly marked with `TODO` blocks describing exactly what
-   they'd be replaced with (a small ARCNN-style deblocking net; a decode
-   path that exposes true subsampled chroma planes). This was the explicit
-   ground-truth-first ordering: get the deterministic pipeline and DNG
-   container correct before anything learned sits on top of it, since a
-   model trained against a buggy container would learn to compensate for
-   the bug.
-2. **No per-camera color science.** `colormatrix.py` deliberately does not
-   try to guess a sensor's native gamut — see its docstring for why that
-   would be fabrication, not reconstruction.
-3. **No synthetic-Bayer-mosaic mode.** This POC only writes Linear DNG
-   (non-mosaiced). A mode that re-mosaics into a fake CFA pattern so a raw
-   converter's own demosaic/denoise engages is a plausible v2 feature, not
-   implemented here.
-4. **The real InvISP path now runs** (see above) but has only been
-   validated on one small synthetic test image on CPU (~36s for 768x512
-   -- untested at real photo resolutions or on GPU, and untested on an
-   actual camera JPEG rather than a synthetic gradient image). Next real
-   step here: run it against real Nikon D700 / Canon EOS 5D photos (ideally
-   ones with known ground-truth RAW, e.g. from FiveK itself) and look at
-   the result critically, not just confirm it doesn't crash.
-5. **Only two cameras.** `canon.pth`/`nikon.pth` cover Canon EOS 5D and
-   Nikon D700 only (what InvISP itself trained on). A JPEG from any other
-   camera gets reconstructed through one of those two learned color/tone
-   behaviors regardless of its real source camera — upstream's own README
-   states this limitation plainly, it's not specific to this integration.
-6. **No training pipeline of our own yet.** If/when retraining or
-   fine-tuning on more cameras becomes the goal, upstream's
-   differentiable JPEG simulator (vendored, see `NOTICE.md`) means
-   training directly against JPEG-compressed inputs is already available
-   in principle — just not wired into a training script here yet. Would
-   need MIT-Adobe FiveK (or NUS/RAISE) and a GPU.
+Run `pseudoraw --help` for every option.
 
-## License
+## Tips
 
-MIT (see `LICENSE`). Contributions welcome — this is meant to be a
-community project, not a solo tool.
+- **Editors apply their own sharpening and noise reduction to raw files.**
+  Your camera's JPEG had sharpening baked in, so an unedited DNG can look
+  slightly softer at first even though the pixels match. Add sharpening as
+  you would for any raw file.
+- **Quick-look viewers may show the small embedded preview**, not the full
+  image. Judge quality at 100% inside your raw editor.
+
+## Documentation
+
+- [How it works](docs/how-it-works.md) — the reconstruction pipeline, stage by stage
+- [DNG format notes](docs/dng-format.md) — how files are written, and what was tested against what
+- [InvISP network](docs/invisp.md) — the optional learned reconstruction path
+- [Training](docs/training.md) — training InvISP on MIT-Adobe FiveK
+- [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+
+## Credits & license
+
+MIT licensed — see [LICENSE](LICENSE). Includes vendored code from
+**InvISP** (Xing, Qian & Chen, CVPR 2021, MIT); full attribution in
+[NOTICE.md](NOTICE.md).
