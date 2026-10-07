@@ -50,7 +50,7 @@ def trainer(tmp_path, monkeypatch):
     def run(**over):
         kw = dict(task="t", data_path=str(data) + "/", batch_size=1, debug_mode=False, gamma=True, camera=cams,
                   rgb_weight=1, out_path=out, resume=False, loss="L1", lr=1e-4, aug=True, workers=1,
-                  epochs=1, start_epoch=None, device="cpu")
+                  epochs=1, start_epoch=None, device="cpu", eval_every=0, eval_images=40, eval_crop=512)
         kw.update(over)
         train.main(SimpleNamespace(**kw))
         return train._load(out + "t/checkpoint/latest_state.pth", "cpu")
@@ -124,3 +124,40 @@ def test_lr_schedule_scales_with_epochs(trainer):
     st = run(epochs=6)
     assert sorted(st["scheduler"]["milestones"]) == [1, 2]  # round(6*50/300), round(6*80/300)
     assert st["scheduler"]["last_epoch"] == 6
+
+
+
+def test_evaluation_writes_csv_and_keeps_best_across_resume(trainer):
+    run, ckpt = trainer
+    st = run(epochs=2, eval_every=1)
+    rows = (ckpt.parent / "eval.csv").read_text().strip().splitlines()
+    assert rows[0] == "epoch,step,raw_psnr,rgb_psnr" and len(rows) == 3  # header + 2 evaluations
+    psnrs = [float(r.split(",")[2]) for r in rows[1:]]
+    assert all(5 < p < 99 for p in psnrs)  # real measurements, not placeholders
+    assert (ckpt / "best.pth").exists()
+    assert st["best_raw_psnr"] == pytest.approx(max(psnrs), abs=1e-3)  # CSV keeps 4 decimals
+    st2 = run(epochs=3, eval_every=1, resume=True)  # best survives the resume
+    assert st2["best_raw_psnr"] >= st["best_raw_psnr"]
+
+
+def test_eval_crop_matches_full_frame_crop(tmp_path):
+    """The evaluation crop must be exactly the centre of the full frame."""
+    import fivek_prepare as fp
+    from dataset.FiveK_dataset import FiveKDatasetTest
+    data = tmp_path / "data"
+    raw = data / "fivek" / "raw" / "Testco_T1"; raw.mkdir(parents=True)
+    meta = data / "fivek" / "_metadata"; meta.mkdir(parents=True)
+    make_cfa_dng(str(raw / "a3.dng"), "GRBG", h=320, w=432)
+    for sp, f in {"train": "training.json", "val": "validation.json", "test": "testing.json"}.items():
+        (meta / f).write_text(json.dumps({"a3": {"urls": {"dng": "x", "tiff16": {}}, "camera": {"make": "Testco", "model": "T1"}}}
+                                         if sp == "test" else {}))
+    cams = fp.prepare_cameras(["Testco T1"], str(data) + "/", workers=1, log=lambda *_: None, use_available=True)
+    ds = FiveKDatasetTest(SimpleNamespace(debug_mode=False, data_path=str(data) + "/", camera=cams, gamma=True))
+    full = ds[0]
+    ds.eval_crop = 128
+    c = ds[0]
+    H, W = full["input_raw"].shape[1:]
+    y, x = (H - 128) // 4 * 2, (W - 128) // 4 * 2
+    assert c["input_raw"].shape[1:] == (128, 128)
+    assert torch.allclose(c["input_raw"], full["input_raw"][:, y:y + 128, x:x + 128], atol=1e-6)
+    assert torch.equal(c["target_rgb"], full["target_rgb"][:, y:y + 128, x:x + 128])

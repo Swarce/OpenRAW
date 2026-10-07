@@ -12,6 +12,10 @@ summarized; commit messages carry the full detail and measurements.
   `OpenRAW` (Make/Software) and `OpenRAW virtual sensor` (UniqueCameraModel).
 
 ### Added
+- Training: held-out evaluation (`--eval_every`, `--eval_images`,
+  `--eval_crop`): raw PSNR (JPEG -> raw, the OpenRAW direction) and rgb PSNR
+  on test-split centre crops, logged and written to `eval.csv`; `best.pth`
+  keeps the best model by raw PSNR across resumes.
 - **`--layout cfa`**: Bayer (RGGB) mosaic DNGs, demosaiced by the raw editor
   like a camera raw; ~18 MB vs ~50 MB for 18 MP. Round trip ~48 dB PSNR
   through libraw's AHD/DCB/PPG. 4 px padding + DefaultCrop; 2-component

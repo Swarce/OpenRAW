@@ -14,7 +14,7 @@ from torch.optim import lr_scheduler
 # dataset/ and config/ ARE top-level here, matching upstream, so those
 # two imports are unchanged.
 from openraw.third_party.invisp.model.model import InvISPNet
-from dataset.FiveK_dataset import FiveKDatasetTrain
+from dataset.FiveK_dataset import FiveKDatasetTrain, FiveKDatasetTest
 from config.config import get_arguments
 
 from openraw.third_party.invisp.utils.JPEG import DiffJPEG
@@ -41,6 +41,11 @@ if __name__ == "__main__":
                         help="with --resume on a weights-only checkpoint (made before full-state "
                              "checkpoints existed): the epoch to continue from")
     parser.add_argument("--device", default="cuda", help="'cuda' (default), 'cuda:1', ... or 'cpu' (slow; for testing)")
+    parser.add_argument("--eval_every", type=int, default=0,
+                        help="evaluate on held-out test images every N epochs (default: ~10 times per run, "
+                             "plus the last epoch); 0 = auto, -1 = never")
+    parser.add_argument("--eval_images", type=int, default=40, help="max test images per evaluation (spread across cameras)")
+    parser.add_argument("--eval_crop", type=int, default=512, help="centre crop size for evaluation")
     parser.add_argument("--checkpointing", choices=["auto", "on", "off"], default="auto",
                         help="gradient checkpointing: recompute each block's activations in the backward pass instead "
                              "of storing them. A 256 px step needs ~6.2 GB without it, ~2.5 GB with it, for ~30-40%% "
@@ -132,6 +137,29 @@ if __name__ == "__main__":
 
     with open(args.out_path+"%s/commandline_args.yaml"%args.task , 'w') as f:
         json.dump(args.__dict__, f, indent=2)
+
+
+def _psnr(a, b):
+    mse = torch.mean((a.clamp(0, 1) - b.clamp(0, 1)) ** 2).item()
+    return 99.0 if mse == 0 else 10 * float(np.log10(1.0 / mse))
+
+
+def evaluate(net, loader, device):
+    """PATCHED (OpenRAW): held-out evaluation, absent upstream (it evaluated in
+    separate scripts after training). Returns mean PSNRs over the test crops:
+      raw_psnr -- the REAL JPEG through the INVERSE network vs the true raw:
+                  OpenRAW's actual use case, and the metric for best.pth;
+      rgb_psnr -- raw through the forward network vs the JPEG."""
+    was_training = net.training
+    net.eval()
+    raw_p, rgb_p = [], []
+    with torch.no_grad():
+        for b in loader:
+            raw, rgb = b["input_raw"].to(device), b["target_rgb"].to(device)
+            rgb_p.append(_psnr(net(raw), rgb))
+            raw_p.append(_psnr(net(rgb, rev=True), raw))
+    net.train(was_training)
+    return float(np.mean(raw_p)), float(np.mean(rgb_p))
 
 
 def _enable_checkpointing(net):
@@ -226,6 +254,27 @@ def main(args):
     print(f"[INFO] {len(RAWDataset)} training images, {len(dataloader)} steps/epoch, "
           f"epochs {start_epoch}..{args.epochs - 1}, {args.workers} loader worker(s), device {device}")
 
+    eval_loader, best_raw = None, -1.0
+    if args.eval_every >= 0:
+        try:
+            test_set = FiveKDatasetTest(opt=args)
+        except (FileNotFoundError, OSError):
+            test_set = None
+        if test_set is not None and len(test_set):
+            test_set.eval_crop = args.eval_crop
+            k = max(1, len(test_set) // max(1, args.eval_images))
+            idx = list(range(0, len(test_set), k))[:args.eval_images]  # spread across cameras
+            eval_loader = DataLoader(torch.utils.data.Subset(test_set, idx), batch_size=1, shuffle=False,
+                                     num_workers=min(2, args.workers))
+            eval_every = args.eval_every or max(1, args.epochs // 10)
+            print(f"[INFO] evaluation: {len(idx)} held-out test images ({args.eval_crop} px centre crops) "
+                  f"every {eval_every} epoch(s) and at the end -> {args.out_path}{args.task}/eval.csv, "
+                  f"best.pth by raw PSNR")
+        else:
+            print("[INFO] evaluation: no test images found -- skipped")
+    if args.resume and os.path.exists(ckpt + "latest_state.pth"):
+        best_raw = _load(ckpt + "latest_state.pth", device).get("best_raw_psnr", -1.0)
+
     print("[INFO] Start to train")
     run_start, epochs_done, start_step = time.time(), 0, step
     for epoch in range(start_epoch, args.epochs):
@@ -267,11 +316,27 @@ def main(args):
             data_t0 = time.time()
 
         scheduler.step()
+        if eval_loader is not None and ((epoch + 1) % eval_every == 0 or epoch == args.epochs - 1):
+            t_eval = time.time()
+            raw_psnr, rgb_psnr = evaluate(net, eval_loader, device)
+            is_best = raw_psnr > best_raw
+            if is_best:
+                best_raw = raw_psnr
+                _save(net.state_dict(), ckpt + "best.pth")
+            csv = args.out_path + "%s/eval.csv" % args.task
+            new_file = not os.path.exists(csv)
+            with open(csv, "a") as f:
+                if new_file:
+                    f.write("epoch,step,raw_psnr,rgb_psnr\n")
+                f.write(f"{epoch},{step},{raw_psnr:.4f},{rgb_psnr:.4f}\n")
+            print(f"[EVAL] epoch {epoch}: raw PSNR {raw_psnr:.2f} dB (JPEG -> raw, the OpenRAW direction) | "
+                  f"rgb PSNR {rgb_psnr:.2f} dB" + (" | new best -> best.pth" if is_best else f" | best {best_raw:.2f}")
+                  + f" | {time.time() - t_eval:.0f}s")
         # weights-only latest.pth stays compatible with `openraw --invisp`;
         # latest_state.pth carries everything --resume needs
         _save(net.state_dict(), ckpt + "latest.pth")
         _save({"net": net.state_dict(), "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
-               "epoch": epoch, "step": step}, ckpt + "latest_state.pth")
+               "epoch": epoch, "step": step, "best_raw_psnr": best_raw}, ckpt + "latest_state.pth")
         if (epoch + 1) % 10 == 0:
             _save(net.state_dict(), ckpt + "%04d.pth" % epoch)
             print("[INFO] Successfully saved " + ckpt + "%04d.pth" % epoch)

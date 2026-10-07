@@ -132,6 +132,21 @@ value matching upstream's (~195k steps). The learning-rate drops (upstream:
 epochs 50 and 80 of 300) scale with `--epochs`, so they always land at the
 same fraction of training.
 
+**Evaluation.** Every `--eval_every` epochs (default: ~10 times per run,
+plus the last epoch) the model is scored on held-out test images
+(`--eval_images`, default 40, spread across cameras; deterministic
+`--eval_crop` 512 px centre crops):
+
+- **raw PSNR** -- the real JPEG through the *inverse* network vs the true raw.
+  This is what OpenRAW actually does, and it picks `best.pth`.
+- **rgb PSNR** -- raw through the forward network vs the JPEG.
+
+Results go to the log (`[EVAL]` lines) and `exps/<task>/eval.csv`; `best.pth`
+(weights-only, usable with `openraw --invisp`) always holds the best model so
+far, and survives `--resume`. Use the curve to decide when to stop: once raw
+PSNR flattens, more epochs are mostly polishing. Per-step training loss is
+too noisy at batch size 1 to judge this.
+
 **Speed.** Images are loaded by parallel worker processes (`--workers`,
 default: up to 8, one less than your CPU cores). Preparing one 18 MP sample
 takes ~0.3-0.5 s of CPU, far longer than the GPU step, so with upstream's

@@ -151,12 +151,28 @@ class FiveKDatasetTest(BaseDataset):
         
         target_rgb_img = imread(target_rgb_path)
         input_raw_wb = np.load(input_raw_wb_path)
-        if mosaic_store.is_mosaic(input_raw_wb):  # PATCHED (OpenRAW): compact storage, full-frame demosaic
+        # PATCHED (OpenRAW): optional deterministic centre crop (eval_crop, set by
+        # train.py's evaluation): full frames don't fit a small GPU and are slow
+        crop = getattr(self, "eval_crop", None)
+        if mosaic_store.is_mosaic(input_raw_wb):  # PATCHED (OpenRAW): compact storage
             mosaic, pattern = mosaic_store.unpack(input_raw_wb)
-            input_raw_img = mosaic_store.demosaic(mosaic, pattern)
+            if crop:
+                H = min(mosaic.shape[0], target_rgb_img.shape[0]); W = min(mosaic.shape[1], target_rgb_img.shape[1])
+                h, w = min(crop, H) // 2 * 2, min(crop, W) // 2 * 2
+                y, x = (H - h) // 4 * 2, (W - w) // 4 * 2  # centred, even (keeps the CFA phase)
+                input_raw_img = mosaic_store.demosaic_region(mosaic, pattern, y, x, h, w)
+                target_rgb_img = target_rgb_img[y:y + h, x:x + w]
+            else:
+                input_raw_img = mosaic_store.demosaic(mosaic, pattern)
             np.clip(input_raw_img, 0, float(input_raw_wb['white_level']), out=input_raw_img)
         else:
             input_raw_img = input_raw_wb['raw']
+            if crop:
+                H = min(input_raw_img.shape[0], target_rgb_img.shape[0]); W = min(input_raw_img.shape[1], target_rgb_img.shape[1])
+                h, w = min(crop, H) // 2 * 2, min(crop, W) // 2 * 2
+                y, x = (H - h) // 4 * 2, (W - w) // 4 * 2
+                input_raw_img = input_raw_img[y:y + h, x:x + w]
+                target_rgb_img = target_rgb_img[y:y + h, x:x + w]
         wb = input_raw_wb['wb']
         wb = wb / wb.max() 
         input_raw_img = input_raw_img * wb[:-1]   
