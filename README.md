@@ -75,6 +75,7 @@ an 18 MP photo around **50 MB**:
 
 `--layout cfa` writes a **Bayer mosaic** instead, like a real camera raw:
 your editor runs its own demosaic, and the file is ~3x smaller (~18 MB).
+Best for photographs; keep linear for screenshots, logos and graphics.
 See [docs/dng-format.md](docs/dng-format.md) for measured quality.
 
 All of these are lossless-JPEG-compressed DNGs (the same compression real

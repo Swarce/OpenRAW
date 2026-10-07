@@ -90,3 +90,15 @@ def test_cfa_round_trip_quality_through_a_real_demosaic(tmp_path, rgb16):
     saturated = psnr(out[:200], ref[:200])  # hard primary-colour edges (measured 35.1 dB)
     assert natural > 44, natural
     assert saturated > 33, saturated
+
+
+def test_cfa_quality_tool_runs(tmp_path, capsys):
+    """tools/cfa_quality.py: measures and writes crops without errors."""
+    sys_path = os.path.join(ROOT, "tools")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("cfa_quality", os.path.join(sys_path, "cfa_quality.py"))
+    tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(tool)
+    tool.main([os.path.join(ROOT, "examples", "test_source.jpg"), "--crops", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "libraw AHD" in out and "PSNR dB" in out
+    assert (tmp_path / "test_source_cfa_crops.png").exists()

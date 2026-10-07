@@ -12,6 +12,9 @@ summarized; commit messages carry the full detail and measurements.
   `OpenRAW` (Make/Software) and `OpenRAW virtual sensor` (UniqueCameraModel).
 
 ### Added
+- `tools/cfa_quality.py`: measure `--layout cfa` round-trip quality on your
+  own photos across every libraw demosaic (+ Adobe's reference renderer),
+  with zoomed side-by-side crops.
 - Training: held-out evaluation (`--eval_every`, `--eval_images`,
   `--eval_crop`): raw PSNR (JPEG -> raw, the OpenRAW direction) and rgb PSNR
   on test-split centre crops, logged and written to `eval.csv`; `best.pth`

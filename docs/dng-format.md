@@ -77,6 +77,17 @@ quality -- the source JPEG's precision is the limit there).
   reference renderer (`dng_validate`) scores lower (43 dB) because its demosaic
   is basic bilinear -- it matches libraw's LINEAR almost exactly; Lightroom /
   Camera Raw use Adobe's production demosaic.
+- **When to use which**: CFA for **photographs** -- at 2x on a real photo's
+  most detailed region, linear and CFA (AHD/DCB) are indistinguishable. Linear
+  for **graphics**: screenshots, logos, text, flat saturated shapes get a
+  visible colour zipper along edges in every engine tested (smart demosaics
+  like AHD/DCB even score *worse* than bilinear there -- their edge-directed
+  guesses overshoot). Real sensors share this weakness; it's why cameras use
+  an anti-aliasing filter.
+- **Measure your own photos**: `python tools/cfa_quality.py photo.jpg
+  --crops out/` prints PSNR / sharpness / colour error for every libraw
+  demosaic (+ Adobe's reference renderer if `OPENRAW_DNG_VALIDATE` is set) and
+  saves zoomed side-by-side crops of each photo's most detailed region.
 - **Known limit**: razor-sharp edges between saturated primaries get some
   false colour (35 dB on a synthetic worst case) -- inherent to sampling one
   colour per pixel; real cameras share it. A chroma low-pass prefilter
