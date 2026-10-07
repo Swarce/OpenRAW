@@ -142,9 +142,17 @@ them with `--resume --start_epoch N`, where N is one more than the last
 continue from there; only the optimizer's momentum restarts, which settles
 within a few hundred steps.
 
-**Memory.** The full 8-block network needs roughly 4 GB for one training
-step at the default 256 px patch -- fine on a GPU, but `--device cpu`
-(meant for testing) needs that much RAM too.
+**Memory.** A 256 px training step of the full 8-block network needs ~5.7 GB
+of activations (+ ~0.5 GB CUDA context) -- more than a 6 GB GPU. On Windows the
+NVIDIA driver then doesn't fail: it silently spills into system RAM, and steps
+get 10-100x slower (measured on an RTX 3050 6 GB: 7-21 s per step). So
+**gradient checkpointing** is on by default for GPUs under 12 GB
+(`--checkpointing auto|on|off`): each block recomputes its activations during
+backward, cutting a step to ~2.5 GB for ~30-40% extra compute, with identical
+loss and gradients (verified for every parameter). The log shows GPU memory
+after the first step and warns if it's nearly full. To make any future
+overflow fail loudly instead of crawling: NVIDIA Control Panel > Manage 3D
+settings > CUDA - Sysmem Fallback Policy > Prefer No Sysmem Fallback.
 
 ## Real fixes applied to get here (not cosmetic — these were blockers)
 

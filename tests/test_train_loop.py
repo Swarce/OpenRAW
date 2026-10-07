@@ -77,3 +77,42 @@ def test_resume_from_weights_only_checkpoint_with_start_epoch(trainer):
     st = run(epochs=3, resume=True, start_epoch=2)
     # continued at epoch 2 with the LR schedule fast-forwarded and the step count estimated
     assert (st["epoch"], st["step"], st["scheduler"]["last_epoch"]) == (2, 6, 3)
+
+
+def test_gradient_checkpointing_is_exact():
+    """Same loss and gradients for every parameter with and without
+    checkpointing. Networks are built independently from one seed: upstream's
+    InvBlock keeps its 1x1 conv behind a lambda capturing `self`, so a
+    copy.deepcopy'd model would still route gradients to the ORIGINAL's conv
+    parameters -- which once made checkpointing look like it lost 24 of them."""
+    import torch.nn.functional as F
+    import train
+    from openraw.third_party.invisp.model.model import InvISPNet
+    from openraw.third_party.invisp.utils.JPEG import DiffJPEG
+
+    def build(ckpt):
+        torch.manual_seed(0)
+        net = InvISPNet(channel_in=3, channel_out=3, block_num=3)
+        if ckpt:
+            train._enable_checkpointing(net)
+        return net
+    a, b = build(False), build(True)
+    jpeg = DiffJPEG(differentiable=True, quality=90)
+    torch.manual_seed(1)
+    x, t = torch.rand(1, 3, 48, 48), torch.rand(1, 3, 48, 48)
+
+    def step(net):
+        rgb = torch.clamp(net(x), 0, 1)
+        loss = F.l1_loss(rgb, t) + F.l1_loss(net(jpeg(rgb), rev=True), x)
+        loss.backward()
+        return loss.item()
+    assert step(a) == step(b)
+    for (n, pa), (_, pb) in zip(a.named_parameters(), b.named_parameters()):
+        assert pa.grad is not None and pb.grad is not None, n
+        assert torch.equal(pa.grad, pb.grad), n
+
+
+def test_training_runs_with_checkpointing(trainer):
+    run, _ = trainer
+    st = run(epochs=1, checkpointing="on")
+    assert st["step"] == 2

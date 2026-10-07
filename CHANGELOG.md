@@ -53,6 +53,11 @@ summarized; commit messages carry the full detail and measurements.
   upstream code and official checkpoints; training scaffolding for FiveK.
 
 ### Fixed
+- Training on 6 GB GPUs crawled (7-21 s/step on an RTX 3050): a 256 px step
+  needs ~6.2 GB, and Windows silently spills the overflow into system RAM.
+  Gradient checkpointing (`--checkpointing auto`, on below 12 GB) cuts it to
+  ~2.5 GB with identical gradients; the log reports GPU memory and warns
+  when it's nearly full.
 - Training: upstream's GPU auto-select shelled out to `grep`/`rm` (absent on
   Windows, so it failed every run) and set `CUDA_VISIBLE_DEVICES` after CUDA
   was already touched; now queries `nvidia-smi` directly and selects by index.

@@ -41,6 +41,10 @@ if __name__ == "__main__":
                         help="with --resume on a weights-only checkpoint (made before full-state "
                              "checkpoints existed): the epoch to continue from")
     parser.add_argument("--device", default="cuda", help="'cuda' (default), 'cuda:1', ... or 'cpu' (slow; for testing)")
+    parser.add_argument("--checkpointing", choices=["auto", "on", "off"], default="auto",
+                        help="gradient checkpointing: recompute each block's activations in the backward pass instead "
+                             "of storing them. A 256 px step needs ~6.2 GB without it, ~2.5 GB with it, for ~30-40%% "
+                             "extra compute; results are identical. auto: on unless the GPU has >= 12 GB.")
     args = parser.parse_args()
     print("Parsed arguments: {}".format(args))
 
@@ -130,6 +134,20 @@ if __name__ == "__main__":
         json.dump(args.__dict__, f, indent=2)
 
 
+def _enable_checkpointing(net):
+    """Gradient checkpointing per InvBlock (PATCHED, OpenRAW): each block's
+    activations are recomputed during backward instead of stored. Measured: a
+    256 px training step needs ~5.7 GB of activations (+ CUDA context) without
+    it -- more than a 6 GB GPU, where Windows silently spills into system RAM
+    and steps took 7-21 s on a user's RTX 3050 -- and ~2.5 GB with it. Exact:
+    identical loss and gradients for all parameters (verified, test pinned).
+    Wraps forward() only; the state_dict is unchanged."""
+    from torch.utils.checkpoint import checkpoint
+    for op in net.operations:
+        f = op.forward
+        op.forward = (lambda f: lambda x, rev=False: checkpoint(f, x, rev, use_reentrant=False))(f)
+
+
 def _save(obj, path):
     """Write-then-rename: an interrupted save never leaves a corrupt checkpoint."""
     tmp = path + ".tmp"
@@ -152,6 +170,12 @@ def main(args):
     os.makedirs(ckpt, exist_ok=True)
     # ======================================define the model======================================
     net = InvISPNet(channel_in=3, channel_out=3, block_num=8).to(device)
+    gpu_gb = torch.cuda.get_device_properties(device).total_memory / 2**30 if device.type == "cuda" else None
+    use_ckpt = {"on": True, "off": False}.get(getattr(args, "checkpointing", "auto"), gpu_gb is None or gpu_gb < 12)
+    if use_ckpt:
+        _enable_checkpointing(net)
+    print(f"[INFO] gradient checkpointing: {'on' if use_ckpt else 'off'}"
+          + (f" (GPU {gpu_gb:.1f} GB; a 256 px step needs ~6.2 GB without it, ~2.5 GB with it)" if gpu_gb else ""))
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 80], gamma=0.5)
     start_epoch, step = 0, 0
@@ -190,7 +214,7 @@ def main(args):
           f"epochs {start_epoch}..{args.epochs - 1}, {args.workers} loader worker(s), device {device}")
 
     print("[INFO] Start to train")
-    run_start, epochs_done = time.time(), 0
+    run_start, epochs_done, start_step = time.time(), 0, step
     for epoch in range(start_epoch, args.epochs):
         epoch_time = time.time()
         data_t0 = time.time()
@@ -218,6 +242,14 @@ def main(args):
             print("task: %s Epoch: %d Step: %d || loss: %.5f raw_loss: %.5f rgb_loss: %.5f || lr: %f || data %.3fs compute %.3fs" % (
                 args.task, epoch, step, loss.detach().cpu().numpy(), raw_loss.detach().cpu().numpy(),
                 rgb_loss.detach().cpu().numpy(), optimizer.param_groups[0]['lr'], data_time, time.time() - step_time))
+            if step == start_step and device.type == "cuda":
+                used = torch.cuda.max_memory_reserved(device) / 2**30
+                print(f"[INFO] GPU memory after first step: {used:.2f} of {gpu_gb:.1f} GB")
+                if used > 0.9 * gpu_gb:
+                    print("[WARN] GPU memory is nearly full. On Windows the NVIDIA driver then silently spills "
+                          "into system RAM and steps get 10-100x slower. Use --checkpointing on, or set NVIDIA "
+                          "Control Panel > CUDA - Sysmem Fallback Policy > Prefer No Sysmem Fallback to get an "
+                          "out-of-memory error instead of a silent slowdown.")
             step += 1
             data_t0 = time.time()
 
