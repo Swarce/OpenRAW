@@ -53,6 +53,9 @@ summarized; commit messages carry the full detail and measurements.
   upstream code and official checkpoints; training scaffolding for FiveK.
 
 ### Fixed
+- Training: upstream's LR milestones (epochs 50/80 of 300, tuned for one
+  ~650-image camera) now scale with `--epochs`; the log suggests an
+  `--epochs` giving upstream's ~195k-step budget. cuDNN autotuning on CUDA.
 - Training on 6 GB GPUs crawled (7-21 s/step on an RTX 3050): a 256 px step
   needs ~6.2 GB, and Windows silently spills the overflow into system RAM.
   Gradient checkpointing (`--checkpointing auto`, on below 12 GB) cuts it to

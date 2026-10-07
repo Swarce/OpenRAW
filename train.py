@@ -177,7 +177,12 @@ def main(args):
     print(f"[INFO] gradient checkpointing: {'on' if use_ckpt else 'off'}"
           + (f" (GPU {gpu_gb:.1f} GB; a 256 px step needs ~6.2 GB without it, ~2.5 GB with it)" if gpu_gb else ""))
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[50, 80], gamma=0.5)
+    # PATCHED (OpenRAW): upstream's LR drops at epochs 50 and 80 of 300 were
+    # tuned for ONE camera (~650 images, ~195k steps). They now scale with
+    # --epochs, so the drops land at the same fraction of training whatever
+    # the run length (identical to upstream at --epochs 300).
+    milestones = sorted({max(1, round(args.epochs * m / 300)) for m in (50, 80)})
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.5)
     start_epoch, step = 0, 0
 
     if args.resume:
@@ -210,6 +215,14 @@ def main(args):
     # seed, so augmentations differ across workers -- verified; we require >=1.10)
     if args.resume and step == 0 and start_epoch:  # weights-only resume: estimate the step count
         step = start_epoch * len(dataloader)
+    if device.type == "cuda":
+        # fixed 256 px input: let cuDNN benchmark and pick the fastest conv algorithms
+        torch.backends.cudnn.benchmark = True
+    total_steps = len(dataloader) * args.epochs
+    print(f"[INFO] LR schedule: x0.5 at epochs {milestones} of {args.epochs}; {total_steps:,} steps in total")
+    if len(dataloader) and abs(total_steps / 195_000 - 1) > 0.5:
+        print(f"[INFO] note: upstream InvISP trained ~195,000 steps (one camera, 650 images x 300 epochs). "
+              f"For a similar amount of training on this dataset: --epochs {max(1, round(195_000 / len(dataloader)))}")
     print(f"[INFO] {len(RAWDataset)} training images, {len(dataloader)} steps/epoch, "
           f"epochs {start_epoch}..{args.epochs - 1}, {args.workers} loader worker(s), device {device}")
 

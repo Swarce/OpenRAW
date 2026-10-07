@@ -116,3 +116,11 @@ def test_training_runs_with_checkpointing(trainer):
     run, _ = trainer
     st = run(epochs=1, checkpointing="on")
     assert st["step"] == 2
+
+
+def test_lr_schedule_scales_with_epochs(trainer):
+    """LR drops land at the same fraction of training as upstream's 50/80 of 300."""
+    run, _ = trainer
+    st = run(epochs=6)
+    assert sorted(st["scheduler"]["milestones"]) == [1, 2]  # round(6*50/300), round(6*80/300)
+    assert st["scheduler"]["last_epoch"] == 6

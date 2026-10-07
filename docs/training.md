@@ -123,6 +123,15 @@ clipped values that can't be recovered.
 random crop/flip/rotate; also `--batch_size`, `--lr`, `--loss`, `--epochs`
 (default 300).
 
+**How long to train.** Upstream's 300 epochs were chosen for one camera
+(~650 images, ~195,000 steps). Pooling many cameras at 300 epochs multiplies
+that -- ~4,000 images is ~1.2M steps. One 256 px step is ~1.5 TFLOP (measured,
+with checkpointing): ~1.2 s on a laptop RTX 3050, so 1.2M steps is ~16 days.
+Pick `--epochs` for the step budget you want; the startup log suggests a
+value matching upstream's (~195k steps). The learning-rate drops (upstream:
+epochs 50 and 80 of 300) scale with `--epochs`, so they always land at the
+same fraction of training.
+
 **Speed.** Images are loaded by parallel worker processes (`--workers`,
 default: up to 8, one less than your CPU cores). Preparing one 18 MP sample
 takes ~0.3-0.5 s of CPU, far longer than the GPU step, so with upstream's
