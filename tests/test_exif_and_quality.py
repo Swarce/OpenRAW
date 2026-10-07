@@ -433,13 +433,14 @@ def _dng_validate_bin():
                     reason="Adobe dng_validate not available (build: tools/build_dng_validate.sh)")
 @pytest.mark.parametrize("write_preview", [True, False])
 @pytest.mark.parametrize("compression,bit_depth", [("none", 16), ("ljpeg", 16), ("ljpeg", 12), ("ljpeg", 10)])
-def test_dng_passes_adobe_dng_validate(tmp_path, write_preview, compression, bit_depth):
+@pytest.mark.parametrize("layout", ["linear", "cfa"])
+def test_dng_passes_adobe_dng_validate(tmp_path, write_preview, compression, bit_depth, layout):
     """Strictest check available: Adobe's own reference validator must
     report no errors AND no warnings, for both layouts."""
     import subprocess
     rgb16 = (np.random.default_rng(0).random((128, 128, 3)) * 65535).astype(np.uint16)
     out = str(tmp_path / "out.dng")
-    write_linear_dng(out, rgb16, write_preview=write_preview, compression=compression, bit_depth=bit_depth)
+    write_linear_dng(out, rgb16, write_preview=write_preview, compression=compression, bit_depth=bit_depth, layout=layout)
     r = subprocess.run([_dng_validate_bin(), out], capture_output=True, text=True)
     text = r.stdout + r.stderr
     assert "*** Error" not in text and "*** Warning" not in text, text

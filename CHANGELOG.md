@@ -12,6 +12,10 @@ summarized; commit messages carry the full detail and measurements.
   `OpenRAW` (Make/Software) and `OpenRAW virtual sensor` (UniqueCameraModel).
 
 ### Added
+- **`--layout cfa`**: Bayer (RGGB) mosaic DNGs, demosaiced by the raw editor
+  like a camera raw; ~18 MB vs ~50 MB for 18 MP. Round trip ~48 dB PSNR
+  through libraw's AHD/DCB/PPG. 4 px padding + DefaultCrop; 2-component
+  lossless-JPEG tiles. Passes Adobe `dng_validate` in every mode.
 - Training: parallel data loading (`--workers`, default up to 8; upstream
   loaded on the main thread, leaving the GPU mostly idle), exact resume from
   full-state checkpoints (`latest_state.pth`: optimizer, LR schedule,

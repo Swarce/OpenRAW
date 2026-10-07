@@ -73,6 +73,10 @@ an 18 MP photo around **50 MB**:
 | `--bit-depth 10` | 37 MB | within 1/7 of a JPEG tonal step |
 | `--compression none` | 108 MB | bit-exact, uncompressed |
 
+`--layout cfa` writes a **Bayer mosaic** instead, like a real camera raw:
+your editor runs its own demosaic, and the file is ~3x smaller (~18 MB).
+See [docs/dng-format.md](docs/dng-format.md) for measured quality.
+
 All of these are lossless-JPEG-compressed DNGs (the same compression real
 cameras use for raw), verified in both Adobe's DNG SDK and libraw.
 

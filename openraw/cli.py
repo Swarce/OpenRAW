@@ -73,6 +73,9 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--bit-depth", type=int, choices=[16, 14, 12, 10], default=12,
                    help="ljpeg only. 12 (default) ~half the size of uncompressed, error <=1/20 of a source "
                         "8-bit step; 10 smaller still (<=1/7 step); 16 bit-exact.")
+    g.add_argument("--layout", choices=["linear", "cfa"], default="linear",
+                   help="linear (default): demosaiced RGB, no demosaicing needed by readers. cfa: an RGGB "
+                        "Bayer mosaic like a real camera raw -- your editor runs its own demosaic; ~1/3 the size.")
     g.add_argument("--no-exif", action="store_true",
                    help="don't carry camera metadata (Make/Model/lens/exposure...) into the DNG. GPS is never carried.")
     g.add_argument("--no-preview", action="store_true", help="skip the embedded JPEG preview")
@@ -114,6 +117,7 @@ def _config_from_args(a) -> PipelineConfig:
         dng_compression=a.compression,
         dng_bit_depth=a.bit_depth,
         encode_threads=a.threads or None,
+        dng_layout=a.layout,
         preserve_exif=not a.no_exif,
         write_preview=not a.no_preview,
         preview_max_dim=a.preview_max_dim,

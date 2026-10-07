@@ -64,6 +64,34 @@ losslessly. Dither noise accounts for only ~2 MB of the default size.
 | single-component "W×3 wide" LJPEG | passes Adobe's SDK, but libraw scrambles every tile |
 | letting tifffile infer LinearRaw layout | varies by tifffile version (see below) |
 
+## CFA (Bayer) layout: `--layout cfa`
+
+Instead of 3 samples per pixel, the main image is a single-channel **RGGB
+mosaic** (PhotometricInterpretation CFA), so raw editors run their *own*
+demosaic, exactly as for a camera raw. About a third of the data: an 18 MP
+photo is ~18 MB at the default 12 bits (10-bit: ~13.5 MB, same measured
+quality -- the source JPEG's precision is the limit there).
+
+- **Round trip**, measured on a real 18 MP photo against the linear output:
+  ~48 dB PSNR through libraw's AHD/DCB/PPG, 91-99% of the sharpness. Adobe's
+  reference renderer (`dng_validate`) scores lower (43 dB) because its demosaic
+  is basic bilinear -- it matches libraw's LINEAR almost exactly; Lightroom /
+  Camera Raw use Adobe's production demosaic.
+- **Known limit**: razor-sharp edges between saturated primaries get some
+  false colour (35 dB on a synthetic worst case) -- inherent to sampling one
+  colour per pixel; real cameras share it. A chroma low-pass prefilter
+  (emulating a sensor's OLPF) was tried and made both test images *worse*,
+  so it isn't used.
+- **Padding**: the image is mirror-padded by 4 px and `DefaultCrop` removes it,
+  so demosaicing has neighbours at the edges (Adobe warns below 2 px; 4 px
+  measured edge quality level with the interior). libraw reports the crop to
+  apps but its own `postprocess()` doesn't apply it -- apps that ignore it
+  show a 4 px mirrored border.
+- **Compression**: lossless-JPEG tiles in the standard camera layout, 2
+  components at half width (a 1-component encode of a mosaic saved nothing,
+  since neighbours are different colours). Bit-exact vs uncompressed in both
+  Adobe's SDK and libraw.
+
 ## tifffile version-proofing
 
 tifffile doesn't know LinearRaw (34892), so it must *guess* how the 3

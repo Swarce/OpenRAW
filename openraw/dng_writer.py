@@ -217,6 +217,94 @@ def _main_image_payload(rgb16: np.ndarray, compression: str, bit_depth: int, thr
     return _ljpeg_tiles(data, bit_depth, threads=threads), kwargs, raw_tags
 
 
+
+CFA_PATTERN = "RGGB"
+CFA_PAD = 4
+_CFA_INDEX = {"RGGB": (0, 1, 1, 2), "GRBG": (1, 0, 2, 1), "BGGR": (2, 1, 1, 0), "GBRG": (1, 2, 0, 1)}
+
+
+def _rgb_to_mosaic(rgb16: np.ndarray, pattern: str = CFA_PATTERN, pad: int = CFA_PAD) -> np.ndarray:
+    """Bayer-sample our linear RGB into a single-channel CFA mosaic.
+
+    The image is mirror-padded by `pad` px first (even, so the CFA phase is
+    kept) and the DNG's DefaultCrop removes the border: demosaicing needs
+    neighbours, so without padding edge pixels are reconstructed worse (Adobe's
+    dng_validate warns: "too little padding"). Measured with libraw AHD/DCB on a
+    real photo: 4 px brings edge quality level with the interior. libraw reads
+    DefaultCrop and reports it to apps (sizes.crop_*) but its own postprocess
+    doesn't apply it, so apps that ignore it show a 4 px mirrored border.
+    """
+    if pad:
+        rgb16 = np.pad(rgb16, ((pad, pad), (pad, pad), (0, 0)), mode="reflect")
+    h, w, _ = rgb16.shape
+    idx = np.tile(np.array(_CFA_INDEX[pattern]).reshape(2, 2), ((h + 1) // 2, (w + 1) // 2))[:h, :w]
+    return np.ascontiguousarray(np.take_along_axis(rgb16, idx[..., None], 2)[..., 0])
+
+
+def _ljpeg_cfa_tiles(data: np.ndarray, bits: int, tile: int = LJPEG_TILE, threads: int | None = None):
+    """CFA tiles as lossless JPEG in the standard camera layout: 2 components
+    at half width, so each component's left neighbour is the SAME colour (a
+    plain 1-component encode of a mosaic saved nothing: 36.0 -> 36.1 MB).
+    Verified bit-exact against uncompressed in both Adobe's SDK and libraw."""
+    import imagecodecs
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    h, w = data.shape
+    coords = [(ty, tx) for ty in range(0, h, tile) for tx in range(0, w, tile)]
+
+    def encode(yx):
+        ty, tx = yx
+        t = np.zeros((tile, tile), dtype=np.uint16)
+        blk = data[ty:ty + tile, tx:tx + tile]
+        t[:blk.shape[0], :blk.shape[1]] = blk
+        return imagecodecs.jpeg8_encode(t.reshape(tile, tile // 2, 2), lossless=True, predictor=1, bitspersample=bits)
+
+    n = threads or os.cpu_count() or 1
+    if n <= 1:
+        yield from map(encode, coords)
+        return
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        yield from pool.map(encode, coords)
+
+
+def _cfa_payload(rgb16: np.ndarray, compression: str, bit_depth: int, threads: int | None = None):
+    """-> (data, write kwargs, raw-IFD tags) for a CFA (Bayer) main image."""
+    mosaic = _rgb_to_mosaic(rgb16)
+    h, w = mosaic.shape
+    raw_tags = [
+        (33421, "H", 2, (2, 2), False),                       # CFARepeatPatternDim
+        (33422, "B", 4, _CFA_INDEX[CFA_PATTERN], False),      # CFAPattern
+        (50710, "B", 3, (0, 1, 2), False),                    # CFAPlaneColor: R, G, B
+        (50711, "H", 1, 1, False),                            # CFALayout: rectangular
+        (50714, "I", 1, (0,), False),                         # BlackLevel
+        (50717, "I", 1, (65535,), False),                     # WhiteLevel
+        (50719, "I", 2, (CFA_PAD, CFA_PAD), False),           # DefaultCropOrigin
+        (50720, "I", 2, (w - 2 * CFA_PAD, h - 2 * CFA_PAD), False),  # DefaultCropSize
+    ]
+    kwargs = {}
+    if compression == "ljpeg":
+        if bit_depth not in _VALID_BIT_DEPTHS:
+            raise ValueError(f"bit_depth must be one of {_VALID_BIT_DEPTHS}, got {bit_depth}")
+        try:
+            import imagecodecs
+            imagecodecs.jpeg8_encode(np.zeros((8, 4, 2), np.uint16), lossless=True, predictor=1, bitspersample=bit_depth)
+        except Exception as e:
+            print(f"[openraw] lossless JPEG unavailable ({type(e).__name__}: {e}) -- install/upgrade "
+                  f"'imagecodecs' (>=2023.9.18). Writing UNCOMPRESSED (larger, still valid) instead.")
+            return mosaic, kwargs, raw_tags
+        data = mosaic
+        if bit_depth < 16:
+            table = _linearization_table(bit_depth)
+            data = _encode_codes(mosaic, table)
+            raw_tags.append((50712, "H", len(table), tuple(int(v) for v in table), False))
+        kwargs = dict(shape=mosaic.shape, dtype=np.uint16, compression=7, bitspersample=bit_depth,
+                      tile=(LJPEG_TILE, LJPEG_TILE))
+        return _ljpeg_cfa_tiles(data, bit_depth, threads=threads), kwargs, raw_tags
+    if compression != "none":
+        raise ValueError(f"compression must be 'ljpeg' or 'none', got {compression!r}")
+    return mosaic, kwargs, raw_tags
+
 def _finalize_main_ifd(path: str, main_in_subifd: bool) -> None:
     """
     Post-write fix-up of the main raw IFD, in place. Why this exists:
@@ -274,6 +362,7 @@ def write_linear_dng(
     compression: str = "ljpeg",
     bit_depth: int = 12,
     threads: int | None = None,
+    layout: str = "linear",
     exif_fields: dict | None = None,
     write_preview: bool = True,
     preview_max_dim: int = 1024,
@@ -308,6 +397,13 @@ def write_linear_dng(
         deband/dither headroom survives intact. For scale: the source's
         own 8-bit pixels with zero headroom need ~24MB losslessly -- the
         6MB JPEG is only that small because it discards information.
+    layout: "linear" (default) -- 3 samples per pixel (LinearRaw), no
+        demosaicing needed by readers -- or "cfa" -- a single-channel RGGB
+        Bayer mosaic, so raw editors run their OWN demosaic, like for a real
+        camera raw (and enable features that only work on mosaic raws). ~1/3
+        the data: an 18 MP photo is ~18 MB at the default 12 bits vs ~50 MB.
+        The re-mosaic round trip measured ~48 dB PSNR through libraw's
+        AHD/DCB/PPG demosaics (generally invisible above ~40 dB).
     threads: worker threads for lossless-JPEG tile encoding. None (default) =
         all CPU cores; 1 = single-threaded. Output is byte-identical either way.
     exif_fields: output of exif_transfer.extract_exif() on the source
@@ -430,14 +526,27 @@ def write_linear_dng(
         # explicit and version-independent.
         extrasamples=(),
     )
-    main_data, main_extra, main_raw_tags = _main_image_payload(rgb16, compression, bit_depth, threads)
-    main_kwargs.update(main_extra)
-    raw_extratags = raw_extratags + main_raw_tags  # LinearizationTable is a raw-IFD tag
-    main_kwargs["extratags"] = main_kwargs["extratags"] + main_raw_tags
+    if layout == "cfa":
+        # Single-channel Bayer mosaic. tifffile knows CFA (32803) and a
+        # 1-sample image natively -- nothing to guess, so no post-write
+        # fix-up; and its raw-IFD tags replace the 3-sample black/white ones.
+        main_data, cfa_kwargs, raw_extratags = _cfa_payload(rgb16, compression, bit_depth, threads)
+        main_kwargs = dict(photometric=32803, description=description, software=f"OpenRAW {pipeline_version}",
+                           metadata=None, subfiletype=0, extratags=ifd0_extratags + raw_extratags, **cfa_kwargs)
+        finalize = False
+    elif layout == "linear":
+        main_data, main_extra, main_raw_tags = _main_image_payload(rgb16, compression, bit_depth, threads)
+        main_kwargs.update(main_extra)
+        raw_extratags = raw_extratags + main_raw_tags  # LinearizationTable is a raw-IFD tag
+        main_kwargs["extratags"] = main_kwargs["extratags"] + main_raw_tags
+        finalize = True
+    else:
+        raise ValueError(f"layout must be 'linear' or 'cfa', got {layout!r}")
 
     if not write_preview:
         tifffile.imwrite(path, main_data, **main_kwargs)
-        _finalize_main_ifd(path, main_in_subifd=False)
+        if finalize:
+            _finalize_main_ifd(path, main_in_subifd=False)
         return
 
     # Preview layout: IFD0 (preview) carries the DNG/EXIF tags, the raw
@@ -473,4 +582,5 @@ def write_linear_dng(
             **preview_kwargs,
         )
         tf.write(main_data, **main_kwargs)
-    _finalize_main_ifd(path, main_in_subifd=True)
+    if finalize:
+        _finalize_main_ifd(path, main_in_subifd=True)
