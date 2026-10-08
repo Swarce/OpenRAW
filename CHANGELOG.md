@@ -73,6 +73,12 @@ summarized; commit messages carry the full detail and measurements.
 - Gradient checkpointing (`--checkpointing auto`, on below 12 GB): fits the
   8-block network on 6 GB GPUs, identical gradients.
 - `--time_limit_hours`: stop cleanly between epochs before a session limit.
+- **Weight averaging (`--ema`, default 0.999)**: evaluation and the saved
+  `best.pth` / `latest.pth` / `NNNN.pth` use an exponential moving average of
+  the weights, which doesn't jitter between snapshots the way the live
+  weights do late in training (held-out raw PSNR moved 39.47 → 38.80 dB
+  between two snapshots). Resumes continue the average; older runs start it
+  on resume.
 - `--log_every N` (default 50): one step line per N steps with averaged
   losses, and mean losses on each epoch line. Per-step printing made long
   runs' logs (~50,000 lines per Kaggle session) slow to view.

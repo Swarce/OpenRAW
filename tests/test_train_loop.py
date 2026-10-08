@@ -239,3 +239,54 @@ def test_two_process_training_stops_together_and_resumes_on_one(trainer):
     assert (st["epoch"], st["step"]) == (1, 3)
     st = run(epochs=3, resume=True, gpus=2)      # and back to two
     assert (st["epoch"], st["step"]) == (2, 4)
+
+
+def test_ema_math_and_warmup():
+    import train
+    net = torch.nn.Linear(3, 2)
+    with torch.no_grad():
+        net.weight.zero_(); net.bias.zero_()
+    ema = train._EMA(net, decay=0.9)
+    with torch.no_grad():
+        net.weight.fill_(1.0)
+    ema.update()  # warm-up: effective decay min(0.9, 2/11)
+    d = 2 / 11
+    assert torch.allclose(ema.state_dict()["weight"], torch.full((2, 3), 1 - d))
+    for _ in range(200):
+        ema.update()
+    assert torch.allclose(ema.state_dict()["weight"], torch.ones(2, 3), atol=1e-6)  # converges to the weights
+    assert ema.state_dict()["weight"] is not net.weight  # a separate copy, not an alias
+
+
+def test_ema_is_saved_evaluated_and_resumed(trainer):
+    run, ckpt = trainer
+    st = run(epochs=2, eval_every=1, ema=0.9)
+    assert st["ema_updates"] == 4  # 2 steps x 2 epochs
+    latest = torch.load(ckpt / "latest.pth", weights_only=True)
+    best = torch.load(ckpt / "best.pth", weights_only=True)
+    # latest.pth / best.pth are the AVERAGED weights, not the live ones
+    k = next(k for k, v in st["net"].items() if v.is_floating_point() and v.numel() > 1)
+    assert torch.equal(latest[k], st["ema"][k])
+    assert not torch.equal(latest[k], st["net"][k])
+    assert set(best) == set(st["net"])  # loadable by `openraw --invisp-checkpoint`
+    st2 = run(epochs=3, eval_every=1, ema=0.9, resume=True)
+    assert st2["ema_updates"] == 6  # the average continued, not restarted
+    rows = (ckpt.parent / "eval.csv").read_text().strip().splitlines()
+    assert len(rows) == 4
+
+
+def test_ema_starts_from_current_weights_when_resuming_an_older_run(trainer):
+    """A run saved before --ema existed (no 'ema' in latest_state.pth) resumes fine."""
+    run, ckpt = trainer
+    st = run(epochs=1)  # EMA off: like an older run
+    assert "ema" not in st
+    st2 = run(epochs=2, ema=0.9, resume=True)
+    assert st2["ema_updates"] == 2
+
+
+def test_ema_off_saves_live_weights(trainer):
+    run, ckpt = trainer
+    st = run(epochs=1, ema=0)
+    latest = torch.load(ckpt / "latest.pth", weights_only=True)
+    assert all(torch.equal(latest[k], v) for k, v in st["net"].items())
+    assert "ema" not in st

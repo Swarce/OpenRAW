@@ -55,6 +55,11 @@ if __name__ == "__main__":
     parser.add_argument("--log_every", type=int, default=50,
                         help="print a step line every N steps, with losses averaged over them (default 50; 1 = every "
                              "step, as upstream). Per-step lines can swamp notebook log viewers.")
+    parser.add_argument("--ema", type=float, default=0.999,
+                        help="exponential moving average of the weights, updated every step with this decay "
+                             "(0.999 averages over ~1,000 steps). Evaluation, best.pth, latest.pth and NNNN.pth "
+                             "use the averaged weights, which are smoother and usually score a little higher "
+                             "than any single step's. 0 = off.")
     parser.add_argument("--eval_images", type=int, default=40, help="max test images per evaluation (spread across cameras)")
     parser.add_argument("--eval_crop", type=int, default=512, help="centre crop size for evaluation")
     parser.add_argument("--checkpointing", choices=["auto", "on", "off"], default="auto",
@@ -217,6 +222,41 @@ def _load(path, device):
         return torch.load(path, map_location=device)
 
 
+class _EMA:
+    """PATCHED (OpenRAW): exponential moving average of the weights. With a
+    small final learning rate and batch size 1-2, the live weights keep
+    jittering around a good solution, so any one snapshot can score noticeably
+    better or worse than its neighbours (held-out raw PSNR moved 39.47 ->
+    38.80 dB between two evaluations 18 epochs apart). The average over the
+    last ~1/(1-decay) steps doesn't jitter, and is what gets evaluated and
+    saved for inference. Lives on rank 0 only (it alone evaluates and saves);
+    the live weights are identical on every rank anyway.
+
+    Warm-up: the effective decay is min(decay, (1+n)/(10+n)) after n updates,
+    so a freshly started average isn't dominated by its starting point."""
+
+    def __init__(self, net, decay, state=None, updates=0):
+        self.decay, self.updates = decay, updates
+        self.src = net.state_dict()  # live references to the training weights
+        self.avg = {k: v.detach().clone() for k, v in self.src.items()}
+        if state is not None:
+            for k, v in state.items():
+                self.avg[k].copy_(v)
+        self.keys_f = [k for k, v in self.avg.items() if v.is_floating_point()]
+        self.keys_other = [k for k, v in self.avg.items() if not v.is_floating_point()]
+
+    @torch.no_grad()
+    def update(self):
+        self.updates += 1
+        d = min(self.decay, (1 + self.updates) / (10 + self.updates))
+        torch._foreach_lerp_([self.avg[k] for k in self.keys_f], [self.src[k] for k in self.keys_f], 1.0 - d)
+        for k in self.keys_other:
+            self.avg[k].copy_(self.src[k])
+
+    def state_dict(self):
+        return self.avg
+
+
 def _average_gradients(params, world):
     """PATCHED (OpenRAW): multi-GPU data parallelism by hand. Each process ran
     forward + inverse + backward on its own image; average the gradients so
@@ -327,6 +367,17 @@ def main(args, rank=0, world=1):
         for t in net.state_dict().values():
             dist.broadcast(t, src=0)
 
+    ema, eval_net = None, net
+    if rank == 0 and getattr(args, "ema", 0) and args.ema > 0:
+        st = _load(ckpt + "latest_state.pth", device) if args.resume and os.path.exists(ckpt + "latest_state.pth") else {}
+        ema = _EMA(net, args.ema, st.get("ema"), st.get("ema_updates", 0))
+        # evaluated in a separate network built from scratch -- not a deepcopy of
+        # `net`, whose checkpointed forward closures would still point at `net`
+        eval_net = InvISPNet(channel_in=3, channel_out=3, block_num=getattr(args, "blocks", 8)).to(device)
+        print(f"[INFO] weight averaging (EMA) decay {args.ema}: evaluation and saved weights use the average"
+              + (" (continuing the saved average)" if st.get("ema") is not None else
+                 " (starting from the current weights)" if args.resume else ""))
+
     print("[INFO] Start data loading and preprocessing")
     RAWDataset = FiveKDatasetTrain(opt=args)
     sampler = None
@@ -380,6 +431,7 @@ def main(args, rank=0, world=1):
 
     print("[INFO] Start to train")
     run_start, epochs_done, start_step = time.time(), 0, step
+    weights = (lambda: ema.state_dict()) if ema is not None else net.state_dict  # what gets saved for inference
     log_every = max(1, getattr(args, "log_every", 50) or 1)
     params = list(net.parameters())
     for epoch in range(start_epoch, args.epochs):
@@ -413,6 +465,8 @@ def main(args, rank=0, world=1):
             if world > 1:
                 _average_gradients(params, world)
             optimizer.step()
+            if ema is not None:
+                ema.update()
 
             losses = torch.stack([loss.detach(), raw_loss.detach(), rgb_loss.detach()])
             win += losses; ep_sum += losses; win_n += 1; ep_n += 1
@@ -442,27 +496,32 @@ def main(args, rank=0, world=1):
             continue
         if eval_loader is not None and ((epoch + 1) % eval_every == 0 or epoch == args.epochs - 1):
             t_eval = time.time()
-            raw_psnr, rgb_psnr = evaluate(net, eval_loader, device)
+            if ema is not None:
+                eval_net.load_state_dict(ema.state_dict())
+            raw_psnr, rgb_psnr = evaluate(eval_net, eval_loader, device)
             is_best = raw_psnr > best_raw
             if is_best:
                 best_raw = raw_psnr
-                _save(net.state_dict(), ckpt + "best.pth")
+                _save(weights(), ckpt + "best.pth")
             csv = args.out_path + "%s/eval.csv" % args.task
             new_file = not os.path.exists(csv)
             with open(csv, "a") as f:
                 if new_file:
                     f.write("epoch,step,raw_psnr,rgb_psnr\n")
                 f.write(f"{epoch},{step},{raw_psnr:.4f},{rgb_psnr:.4f}\n")
-            print(f"[EVAL] epoch {epoch}: raw PSNR {raw_psnr:.2f} dB (JPEG -> raw, the OpenRAW direction) | "
+            print(f"[EVAL] epoch {epoch}{' (EMA)' if ema is not None else ''}: raw PSNR {raw_psnr:.2f} dB "
+                  f"(JPEG -> raw, the OpenRAW direction) | "
                   f"rgb PSNR {rgb_psnr:.2f} dB" + (" | new best -> best.pth" if is_best else f" | best {best_raw:.2f}")
                   + f" | {time.time() - t_eval:.0f}s")
         # weights-only latest.pth stays compatible with `openraw --invisp`;
-        # latest_state.pth carries everything --resume needs
-        _save(net.state_dict(), ckpt + "latest.pth")
+        # latest_state.pth carries everything --resume needs (live weights + average)
+        _save(weights(), ckpt + "latest.pth")
         _save({"net": net.state_dict(), "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
-               "epoch": epoch, "step": step, "best_raw_psnr": best_raw}, ckpt + "latest_state.pth")
+               "epoch": epoch, "step": step, "best_raw_psnr": best_raw,
+               **({"ema": ema.state_dict(), "ema_updates": ema.updates} if ema is not None else {})},
+              ckpt + "latest_state.pth")
         if (epoch + 1) % 10 == 0:
-            _save(net.state_dict(), ckpt + "%04d.pth" % epoch)
+            _save(weights(), ckpt + "%04d.pth" % epoch)
             print("[INFO] Successfully saved " + ckpt + "%04d.pth" % epoch)
 
         epochs_done += 1

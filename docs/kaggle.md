@@ -87,6 +87,11 @@ arguments in the notebook's last cell:
 in `exps/<task>/eval.csv` in the output, which Kaggle keeps even when its log
 viewer trims old lines.
 
+**Eval lines say `(EMA)`** from the session after this change on: the
+model being scored (and saved as `best.pth`) is the weight average described
+in [training.md](training.md), which is steadier between evaluations than
+single snapshots were.
+
 **Log size.** Training prints a step line every 50 steps (averaged over
 them), so a 12 h session logs around a thousand lines instead of ~50,000.
 Kaggle's log viewer gets very slow with long logs; to find an `[EVAL]` line

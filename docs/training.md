@@ -178,6 +178,17 @@ clipped values that can't be recovered.
 random crop/flip/rotate; also `--batch_size`, `--lr`, `--loss`, `--epochs`
 (default 300).
 
+**Weight averaging (EMA).** Training keeps an exponential moving average of
+the weights (`--ema 0.999`: roughly the last 1,000 steps) next to the live
+ones. Late in training, with a small learning rate and batch size 1-2, the
+live weights keep jittering around a good solution, so single snapshots
+score unevenly: the first Kaggle run measured 39.47 dB and then 38.80 dB
+18 epochs later. The average doesn't jitter. Evaluation, `best.pth`,
+`latest.pth` and the `NNNN.pth` snapshots all use it; `latest_state.pth`
+keeps both, so `--resume` continues the average. Runs saved before this
+existed resume too: the average starts from the current weights. `--ema 0`
+turns it off.
+
 **Log volume.** A step line is printed every `--log_every` steps (default
 50), with the losses and timings averaged over those steps, plus the first
 step and the last step of each epoch. Each `[INFO] Epoch N time:` line also
