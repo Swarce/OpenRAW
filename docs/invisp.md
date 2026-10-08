@@ -62,9 +62,9 @@ What the differences mean in practice:
 
 ![Parrot crop: source JPEG, then the raw output of each model](../examples/invisp_models_compared.jpg)
 
-*A 5 MP photo, most likely from a Nikon Coolpix compact (its `DSCN` file
-naming; the EXIF was stripped), so neither of the upstream models' training
-cameras: the source JPEG, then each model's raw output, rendered without a
+*A photo shot by the project's author on a Nikon Coolpix P520 (an 18 MP
+camera; this copy was downscaled to 5 MP), so neither of the upstream
+models' training cameras: the source JPEG, then each model's raw output, rendered without a
 tone curve.*
 
 The OpenRAW models land between the two upstream ones — `e35-best` is
