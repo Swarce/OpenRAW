@@ -42,8 +42,8 @@ jobs:
           - { os: windows-latest, python: "3.14" }
           - { os: macos-latest,   python: "3.13" }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -59,13 +59,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
       - name: Cache dng_validate build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .dng_validate_build
           key: dng-validate-${{ runner.os }}-${{ hashFiles('tools/build_dng_validate.sh', 'tools/dng_xmp_sdk_stub.cpp') }}
@@ -93,8 +93,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -115,8 +115,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Build
@@ -129,7 +129,7 @@ jobs:
           /tmp/v/bin/pip install dist/*.whl
           cd /tmp && /tmp/v/bin/openraw "$GITHUB_WORKSPACE/examples/test_source.jpg" -o /tmp/out.dng
           test -s /tmp/out.dng
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist/
