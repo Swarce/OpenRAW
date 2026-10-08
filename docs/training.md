@@ -154,6 +154,19 @@ single loader the GPU mostly waited. Each step logs `data` (time spent
 waiting for the loader) and `compute` separately -- if `data` stays well
 above zero, raise `--workers`. Each epoch logs its time and an ETA.
 
+**Several GPUs.** `--gpus N` (0 = all available) runs one process per GPU.
+Each takes a different image per step and their gradients are averaged before
+every optimizer step, so N GPUs train exactly like batch size N (verified
+against single-process batch training) at close to N times the speed. An
+epoch still covers the dataset once, so `--epochs` and the learning-rate
+schedule keep their meaning; `--workers` is split across the GPUs. Only GPU 0
+evaluates, saves and decides when to stop (broadcast to the others, so they
+all stop at the same epoch). Hand-written gradient averaging rather than
+PyTorch's DDP: InvISP runs the network twice (forward, then inverse) before
+each backward pass, which DDP's gradient hooks aren't built around. Note the
+effective batch size differs from upstream's 1 -- the held-out evaluation is
+how to check it doesn't hurt.
+
 **Resuming.** Every epoch saves `latest.pth` (weights only, usable with
 `openraw --invisp`) and `latest_state.pth` (weights + optimizer +
 learning-rate schedule + epoch/step). `--resume` continues exactly where it

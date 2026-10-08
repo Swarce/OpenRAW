@@ -32,7 +32,9 @@ week** (TPU quota is separate, but InvISP isn't ported to TPUs), **20 GB** of sa
 
 - **Add Input** → your new dataset.
 - Settings → Accelerator **GPU T4 x2** (or P100 if your account offers it).
-  Training currently uses one GPU, so with T4 x2 the second one sits idle.
+  Training uses **every GPU the session has** -- both T4s, roughly 1.7-1.9x
+  faster than one. To use a single GPU instead, call `kr.run(..., gpus=1)` in
+  the last cell.
 - **Save & Run All (Commit)**. It trains until ~11¼ h into the session, stops
   cleanly *between* epochs, and saves checkpoints, `eval.csv` and `best.pth`.
 - To continue: **Add Input → this notebook's own latest output** (if it's
@@ -48,6 +50,12 @@ training amount (~195k steps) for however many images fit the budget.
 
 - On a 16 GB Kaggle GPU, gradient checkpointing turns off automatically (a step
   needs ~6.2 GB), so steps are ~25% cheaper than on a 6 GB laptop GPU.
+- Measured on one T4: ~0.8 s per step. With both, each GPU takes its own
+  image per step (effective batch 2), so an epoch takes roughly half the steps.
+- A checkpoint from a single-GPU session resumes fine on two GPUs, and the
+  other way round.
+- If the step logs show `data` well above 0 s with two GPUs, the 4 CPUs can't
+  prepare images fast enough; that's the next bottleneck to look at.
 - The total depends on the GPU Kaggle assigns and how many images fit;
   probably a few sessions spread over one to two weeks of free quota. Each
   session's log prints epoch times and an ETA.

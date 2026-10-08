@@ -188,9 +188,11 @@ def prepare(cameras="all", budget_gb: float = 18.0, out: Path = None, jobs: int 
 
 # -------------------------------------------------------------------- train
 def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hours: float | None = None,
-          workers: int = 3, extra_args: list[str] | None = None, session_start: float | None = None) -> int:
+          workers: int = 3, extra_args: list[str] | None = None, session_start: float | None = None,
+          gpus: int = 0) -> int:
     """Run train.py on all cameras in data_root, resuming if a checkpoint is in
-    the output folder, within the remaining session time. Returns its exit code."""
+    the output folder, within the remaining session time. gpus: 0 = every GPU
+    the session has (both on "GPU T4 x2"). Returns its exit code."""
     out_path = WORKING / "exps"
     n = count_train_pairs(data_root)
     epochs = epochs or suggest_epochs(n)
@@ -201,7 +203,7 @@ def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hour
              (out_path / task / "checkpoint" / "latest.pth").exists()
     cmd = [sys.executable, "train.py", "--task", task, "--all-downloaded", "--gamma", "--aug",
            "--data_path", str(data_root) + "/", "--out_path", str(out_path) + "/",
-           "--epochs", str(epochs), "--workers", str(workers),
+           "--epochs", str(epochs), "--workers", str(workers), "--gpus", str(gpus),
            "--time_limit_hours", f"{time_limit_hours:.3f}"] + (["--resume"] if resume else []) + (extra_args or [])
     log(f"{n} training pairs -> {epochs} epochs (~{n * epochs:,} steps); "
         f"time budget {time_limit_hours:.2f} h; {'resuming' if resume else 'fresh start'}")
@@ -227,7 +229,7 @@ def write_status(task: str, epochs: int) -> str:
 
 # ---------------------------------------------------------------------- main
 def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, session_start=None,
-        extra_train_args=None):
+        extra_train_args=None, gpus=0):
     session_start = session_start or time.time()
     roots = find_data_roots(INPUT)
     if not roots:
@@ -248,6 +250,6 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     n = count_train_pairs(data_root)
     epochs = epochs or suggest_epochs(n)
     code = train(task, data_root, epochs=epochs, workers=workers, session_start=session_start,
-                 extra_args=extra_train_args)
+                 extra_args=extra_train_args, gpus=gpus)
     write_status(task, epochs)
     return "trained" if code == 0 else f"train.py exited with code {code}"

@@ -12,6 +12,9 @@ summarized; commit messages carry the full detail and measurements.
   `OpenRAW` (Make/Software) and `OpenRAW virtual sensor` (UniqueCameraModel).
 
 ### Added
+- Training: `--gpus N` multi-GPU data parallelism (one process per GPU,
+  hand-averaged gradients, disjoint sampling, rank 0 evaluates/saves/stops).
+  Exactly equivalent to batch size N. Kaggle runner uses all GPUs by default.
 - **Kaggle training** (`kaggle/openraw_kaggle.ipynb` + `kaggle/kaggle_runner.py`):
   one notebook that prepares a FiveK dataset within Kaggle's 20 GB, then trains
   across 12 h GPU sessions, stopping cleanly and resuming automatically.

@@ -50,9 +50,10 @@ def trainer(tmp_path, monkeypatch):
     def run(**over):
         kw = dict(task="t", data_path=str(data) + "/", batch_size=1, debug_mode=False, gamma=True, camera=cams,
                   rgb_weight=1, out_path=out, resume=False, loss="L1", lr=1e-4, aug=True, workers=1,
-                  epochs=1, start_epoch=None, device="cpu", eval_every=0, eval_images=40, eval_crop=512, time_limit_hours=0)
+                  epochs=1, start_epoch=None, device="cpu", eval_every=0, eval_images=40, eval_crop=512, time_limit_hours=0,
+                  gpus=1, blocks=1)
         kw.update(over)
-        train.main(SimpleNamespace(**kw))
+        train.launch(SimpleNamespace(**kw))
         return train._load(out + "t/checkpoint/latest_state.pth", "cpu")
 
     return run, Path(out) / "t" / "checkpoint"
@@ -172,3 +173,69 @@ def test_time_limit_stops_between_epochs_and_resume_continues(trainer):
     assert st["epoch"] == 0 and st["step"] == 2  # stopped after the first epoch, saved
     st = run(epochs=5, resume=True, time_limit_hours=1e-6)
     assert st["epoch"] == 1 and st["step"] == 4  # one more epoch per "session"
+
+
+
+# ------------------------------------------------------------------ multi-GPU
+def _tiny_setup():
+    from openraw.third_party.invisp.model.model import InvISPNet
+    from openraw.third_party.invisp.utils.JPEG import DiffJPEG
+    torch.manual_seed(0)
+    net = InvISPNet(channel_in=3, channel_out=3, block_num=2)
+    jpeg = DiffJPEG(differentiable=True, quality=90)
+    g = torch.Generator().manual_seed(1)
+    data = [(torch.rand(1, 3, 32, 32, generator=g), torch.rand(1, 3, 32, 32, generator=g)) for _ in range(2)]
+    return net, jpeg, data
+
+
+def _loss(net, jpeg, x, t):
+    import torch.nn.functional as F
+    rgb = torch.clamp(net(x), 0, 1)
+    return F.l1_loss(rgb, t) + F.l1_loss(net(jpeg(rgb), rev=True), x)
+
+
+def _avg_worker(rank, world, port, out):
+    """One 'GPU': gradients on its own sample, then train._average_gradients."""
+    import torch.distributed as dist
+    import train
+    os.environ.update(MASTER_ADDR="127.0.0.1", MASTER_PORT=str(port))
+    dist.init_process_group("gloo", rank=rank, world_size=world)
+    try:
+        net, jpeg, data = _tiny_setup()
+        _loss(net, jpeg, *data[rank]).backward()
+        train._average_gradients(list(net.parameters()), world)
+        torch.save([p.grad.clone() for p in net.parameters()], f"{out}.{rank}")
+    finally:
+        dist.destroy_process_group()
+
+
+def test_multi_gpu_gradient_averaging_equals_batch_training(tmp_path):
+    """Two processes, one sample each, gradients averaged == one process
+    training on both samples' mean loss -- i.e. exactly batch size 2."""
+    import socket
+    import torch.multiprocessing as mp
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0)); port = sk.getsockname()[1]
+    out = str(tmp_path / "grads")
+    mp.spawn(_avg_worker, args=(2, port, out), nprocs=2, join=True)
+    g0, g1 = torch.load(out + ".0"), torch.load(out + ".1")
+    net, jpeg, data = _tiny_setup()
+    ((_loss(net, jpeg, *data[0]) + _loss(net, jpeg, *data[1])) / 2).backward()
+    ref = [p.grad for p in net.parameters()]
+    for a, b, r in zip(g0, g1, ref):
+        assert torch.equal(a, b)                      # every process takes the identical step
+        assert torch.allclose(a, r, rtol=1e-5, atol=1e-7)  # ...and it's the batch-2 gradient
+
+
+def test_two_process_training_stops_together_and_resumes_on_one(trainer):
+    """--gpus 2 (CPU processes here; NCCL on GPUs): an epoch is split between the
+    processes, the time limit stops BOTH (a lone process would hang the other),
+    the checkpoint resumes in single-GPU mode, and vice versa."""
+    run, ckpt = trainer
+    st = run(epochs=5, gpus=2, eval_every=1, time_limit_hours=1e-6)
+    assert (st["epoch"], st["step"]) == (0, 1)  # 2 train images / 2 processes = 1 step per epoch
+    assert (ckpt.parent / "eval.csv").read_text().count("\n") == 2  # header + one evaluation, by rank 0 only
+    st = run(epochs=2, resume=True)             # continue on one process
+    assert (st["epoch"], st["step"]) == (1, 3)
+    st = run(epochs=3, resume=True, gpus=2)      # and back to two
+    assert (st["epoch"], st["step"]) == (2, 4)

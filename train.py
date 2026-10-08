@@ -44,6 +44,11 @@ if __name__ == "__main__":
                         help="with --resume on a weights-only checkpoint (made before full-state "
                              "checkpoints existed): the epoch to continue from")
     parser.add_argument("--device", default="cuda", help="'cuda' (default), 'cuda:1', ... or 'cpu' (slow; for testing)")
+    parser.add_argument("--gpus", type=int, default=1,
+                        help="GPUs to train on in parallel (each takes a different image per step, gradients are "
+                             "averaged: effective batch = gpus x batch_size). 0 = all available. --workers is "
+                             "split across them.")
+    parser.add_argument("--blocks", type=int, default=8, help="InvISP depth (upstream: 8). Smaller only for testing.")
     parser.add_argument("--eval_every", type=int, default=0,
                         help="evaluate on held-out test images every N epochs (default: ~10 times per run, "
                              "plus the last epoch); 0 = auto, -1 = never")
@@ -120,7 +125,11 @@ if __name__ == "__main__":
     # fails on Windows (no grep/rm) and can be ignored once CUDA is initialized.
     # Now: ask nvidia-smi for free memory directly (any OS) and select the GPU
     # by device index. Only when --device is plain "cuda" and there are 2+ GPUs.
-    if args.device == "cuda" and torch.cuda.device_count() > 1:
+    if args.gpus == 0:
+        args.gpus = max(1, torch.cuda.device_count()) if args.device.startswith("cuda") else 1
+    if args.gpus > 1 and args.device.startswith("cuda") and torch.cuda.device_count() < args.gpus:
+        raise SystemExit(f"--gpus {args.gpus}: only {torch.cuda.device_count()} GPU(s) visible")
+    if args.gpus == 1 and args.device == "cuda" and torch.cuda.device_count() > 1:
         try:
             import subprocess
             out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
@@ -132,7 +141,8 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[WARN] GPU auto-select failed ({e}); using cuda:0")
 
-    DiffJPEG = DiffJPEG(differentiable=True, quality=90).to(args.device)
+    # (the differentiable JPEG module is now created inside main(), per process:
+    # building it here would initialize CUDA on GPU 0 in the parent process)
 
     os.makedirs(args.out_path, exist_ok=True)
     os.makedirs(args.out_path+"%s"%args.task, exist_ok=True)
@@ -193,14 +203,68 @@ def _load(path, device):
         return torch.load(path, map_location=device)
 
 
-def main(args):
+def _average_gradients(params, world):
+    """PATCHED (OpenRAW): multi-GPU data parallelism by hand. Each process ran
+    forward + inverse + backward on its own image; average the gradients so
+    every process takes the identical optimizer step. Not DDP: InvISP runs the
+    SAME network twice (forward, then inverse) before one backward, which DDP's
+    once-per-backward gradient hooks aren't designed around. One all-reduce of
+    all gradients flattened (~1.4M floats, ~6 MB): a few ms per step."""
+    import torch.distributed as dist
+    grads = [p.grad if p.grad is not None else torch.zeros_like(p) for p in params]
+    flat = torch.cat([g.reshape(-1) for g in grads])
+    dist.all_reduce(flat)
+    flat /= world
+    off = 0
+    for p, g in zip(params, grads):
+        n = g.numel()
+        p.grad = flat[off:off + n].view_as(p)
+        off += n
+
+
+def _worker(rank, world, args, port):
+    """One process per GPU (spawned by launch())."""
+    import torch.distributed as dist
+    cuda = args.device.startswith("cuda")
+    if cuda:
+        torch.cuda.set_device(rank)
+        args.device = f"cuda:{rank}"
+    os.environ.update(MASTER_ADDR="127.0.0.1", MASTER_PORT=str(port))
+    dist.init_process_group("nccl" if cuda else "gloo", rank=rank, world_size=world)
+    if rank:  # only rank 0 talks; the others' output would duplicate it
+        import builtins
+        builtins.print = lambda *a, **k: None
+    try:
+        main(args, rank=rank, world=world)
+    finally:
+        dist.destroy_process_group()
+
+
+def launch(args):
+    """Train on args.gpus processes (1 = plain single-process training)."""
+    world = getattr(args, "gpus", 1) or 1
+    if world == 1:
+        return main(args)
+    import socket
+    import torch.multiprocessing as mp
+    with socket.socket() as sk:  # a free local port for the processes to rendezvous on
+        sk.bind(("127.0.0.1", 0))
+        port = sk.getsockname()[1]
+    print(f"[INFO] multi-GPU: {world} processes, one per {'GPU' if args.device.startswith('cuda') else 'CPU process'}; "
+          f"effective batch size {world * args.batch_size}")
+    mp.spawn(_worker, args=(world, args, port), nprocs=world, join=True)
+
+
+def main(args, rank=0, world=1):
     # PATCHED (OpenRAW, not upstream) throughout: device-agnostic, parallel
     # data loading, full-state checkpoints + exact resume, honest timing.
     device = torch.device(args.device)
     ckpt = args.out_path + "%s/checkpoint/" % args.task
     os.makedirs(ckpt, exist_ok=True)
     # ======================================define the model======================================
-    net = InvISPNet(channel_in=3, channel_out=3, block_num=8).to(device)
+    net = InvISPNet(channel_in=3, channel_out=3, block_num=getattr(args, "blocks", 8)).to(device)
+    jpeg = DiffJPEG if isinstance(DiffJPEG, torch.nn.Module) else DiffJPEG(differentiable=True, quality=90)
+    jpeg = jpeg.to(device)
     gpu_gb = torch.cuda.get_device_properties(device).total_memory / 2**30 if device.type == "cuda" else None
     use_ckpt = {"on": True, "off": False}.get(getattr(args, "checkpointing", "auto"), gpu_gb is None or gpu_gb < 12)
     if use_ckpt:
@@ -237,10 +301,22 @@ def main(args):
         else:
             raise SystemExit(f"--resume: no checkpoint in {ckpt}")
 
+    if world > 1:
+        # every process must start from identical weights (also after resume)
+        import torch.distributed as dist
+        for t in net.state_dict().values():
+            dist.broadcast(t, src=0)
+
     print("[INFO] Start data loading and preprocessing")
     RAWDataset = FiveKDatasetTrain(opt=args)
-    dataloader = DataLoader(RAWDataset, batch_size=args.batch_size, shuffle=True, drop_last=True,
-                            num_workers=args.workers, persistent_workers=args.workers > 0,
+    sampler = None
+    workers = args.workers if world == 1 else max(1, -(-args.workers // world))  # --workers is split across GPUs
+    if world > 1:
+        from torch.utils.data.distributed import DistributedSampler
+        # each process gets a different, disjoint share of every epoch
+        sampler = DistributedSampler(RAWDataset, num_replicas=world, rank=rank, shuffle=True, drop_last=True)
+    dataloader = DataLoader(RAWDataset, batch_size=args.batch_size, shuffle=sampler is None, sampler=sampler,
+                            drop_last=True, num_workers=workers, persistent_workers=workers > 0,
                             pin_memory=device.type == "cuda")
     # (no worker_init_fn needed: since PyTorch 1.9 each worker gets its own NumPy
     # seed, so augmentations differ across workers -- verified; we require >=1.10)
@@ -250,15 +326,19 @@ def main(args):
         # fixed 256 px input: let cuDNN benchmark and pick the fastest conv algorithms
         torch.backends.cudnn.benchmark = True
     total_steps = len(dataloader) * args.epochs
+    images_per_epoch = len(dataloader) * args.batch_size * world
     print(f"[INFO] LR schedule: x0.5 at epochs {milestones} of {args.epochs}; {total_steps:,} steps in total")
-    if len(dataloader) and abs(total_steps / 195_000 - 1) > 0.5:
-        print(f"[INFO] note: upstream InvISP trained ~195,000 steps (one camera, 650 images x 300 epochs). "
-              f"For a similar amount of training on this dataset: --epochs {max(1, round(195_000 / len(dataloader)))}")
-    print(f"[INFO] {len(RAWDataset)} training images, {len(dataloader)} steps/epoch, "
-          f"epochs {start_epoch}..{args.epochs - 1}, {args.workers} loader worker(s), device {device}")
+    if images_per_epoch and abs(images_per_epoch * args.epochs / 195_000 - 1) > 0.5:
+        print(f"[INFO] note: upstream InvISP trained on ~195,000 image samples (one camera, 650 images x 300 "
+              f"epochs). For a similar amount of training on this dataset: "
+              f"--epochs {max(1, round(195_000 / images_per_epoch))}")
+    print(f"[INFO] {len(RAWDataset)} training images, {len(dataloader)} steps/epoch"
+          + (f" per GPU ({world} GPUs, {images_per_epoch} images/epoch)" if world > 1 else "")
+          + f", epochs {start_epoch}..{args.epochs - 1}, {workers} loader worker(s)"
+          + (" per GPU" if world > 1 else "") + f", device {device}")
 
     eval_loader, best_raw = None, -1.0
-    if args.eval_every >= 0:
+    if args.eval_every >= 0 and rank == 0:  # only rank 0 evaluates and saves
         try:
             test_set = FiveKDatasetTest(opt=args)
         except (FileNotFoundError, OSError):
@@ -280,7 +360,10 @@ def main(args):
 
     print("[INFO] Start to train")
     run_start, epochs_done, start_step = time.time(), 0, step
+    params = list(net.parameters())
     for epoch in range(start_epoch, args.epochs):
+        if sampler is not None:
+            sampler.set_epoch(epoch)  # a different shuffle each epoch, the same on every process
         epoch_time = time.time()
         data_t0 = time.time()
         for i_batch, sample_batched in enumerate(dataloader):
@@ -294,7 +377,7 @@ def main(args):
             reconstruct_rgb = net(input)
             reconstruct_rgb = torch.clamp(reconstruct_rgb, 0, 1)
             rgb_loss = F.l1_loss(reconstruct_rgb, target_rgb)
-            reconstruct_rgb = DiffJPEG(reconstruct_rgb)
+            reconstruct_rgb = jpeg(reconstruct_rgb)
             reconstruct_raw = net(reconstruct_rgb, rev=True)
             raw_loss = F.l1_loss(reconstruct_raw, target_raw)
 
@@ -302,6 +385,8 @@ def main(args):
 
             optimizer.zero_grad()
             loss.backward()
+            if world > 1:
+                _average_gradients(params, world)
             optimizer.step()
 
             print("task: %s Epoch: %d Step: %d || loss: %.5f raw_loss: %.5f rgb_loss: %.5f || lr: %f || data %.3fs compute %.3fs" % (
@@ -319,6 +404,10 @@ def main(args):
             data_t0 = time.time()
 
         scheduler.step()
+        if rank != 0:  # rank 0 evaluates, saves and decides whether to stop
+            if world > 1 and _stop_flag(False, rank):
+                break
+            continue
         if eval_loader is not None and ((epoch + 1) % eval_every == 0 or epoch == args.epochs - 1):
             t_eval = time.time()
             raw_psnr, rgb_psnr = evaluate(net, eval_loader, device)
@@ -353,15 +442,31 @@ def main(args):
         # this one is already saved -- if the next one (with a 15% margin for an
         # evaluation pass) wouldn't finish in time, instead of being killed mid-save.
         limit = getattr(args, "time_limit_hours", 0) or 0
+        stop = False
         if limit and epoch < args.epochs - 1:
             elapsed = time.time() - run_start
             per_epoch = elapsed / epochs_done
             if elapsed + 1.15 * per_epoch > limit * 3600:
                 print(f"[INFO] time limit: stopping after epoch {epoch} ({elapsed / 3600:.2f} h used of "
                       f"{limit:.2f} h; next epoch needs ~{per_epoch / 3600:.2f} h). Continue with --resume.")
-                break
+                stop = True
+        # with several GPUs, every process must stop at the same epoch -- one
+        # quitting alone would leave the others waiting forever in all_reduce
+        if world > 1:
+            stop = _stop_flag(stop, rank)
+        if stop:
+            break
+
+
+def _stop_flag(stop, rank):
+    """Rank 0's stop decision, broadcast to every process."""
+    import torch.distributed as dist
+    dev = torch.device("cuda", torch.cuda.current_device()) if dist.get_backend() == "nccl" else torch.device("cpu")
+    t = torch.tensor([1 if stop else 0], device=dev)
+    dist.broadcast(t, src=0)
+    return bool(t.item())
 
 if __name__ == '__main__':
 
     torch.set_num_threads(4)
-    main(args)
+    launch(args)
