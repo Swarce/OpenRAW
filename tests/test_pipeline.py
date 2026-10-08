@@ -238,3 +238,29 @@ def test_cli_invisp_checkpoint_flag(jpeg_path, tmp_path):
     out = str(tmp_path / "out.dng")
     assert main([jpeg_path, "-o", out, "--invisp-checkpoint", ck, "-q"]) == 0  # implies --invisp
     assert os.path.getsize(out) > 0
+
+
+@pytest.mark.skipif(not os.path.exists(NIKON), reason="pretrained/nikon.pth not present")
+def test_invisp_tiled_inference_matches_whole_image():
+    """Whole-image InvISP needs ~1.8 GB per megapixel (an 18 MP photo: ~32 GB),
+    so inference runs in tiles with a 96 px overlap -- more than the network's
+    80 px receptive radius. Must equal whole-image inference to float rounding;
+    with no overlap the seams must differ (proves this test can fail)."""
+    torch = pytest.importorskip("torch")
+    from openraw import invisp_bridge as b
+    rng = np.random.default_rng(0)
+    y, x = np.mgrid[0:150, 0:210]
+    img = np.clip(np.stack([x / 210, y / 150, 0.5 + 0.2 * np.sin(x / 7.0)], -1)
+                  + rng.normal(0, 0.05, (150, 210, 3)), 0, 1).astype(np.float32)
+    net = b._load_net("NIKON_D700", "pretrained", "cpu", NIKON)
+    t = torch.from_numpy(img).permute(2, 0, 1)[None].contiguous()
+    with torch.no_grad():
+        whole = net(t, rev=True)
+        tiled = b._run_tiled(net, t, rev=True, tile=64)
+        no_overlap = b._run_tiled(net, t, rev=True, tile=64, margin=0)
+    assert (tiled - whole).abs().max().item() < 1 / 65535 / 20  # far below one 16-bit step
+    assert (no_overlap - whole).abs().max().item() > 1e-3        # seams without overlap
+    # and through the public API
+    out = b.reconstruct_pseudo_raw(img, checkpoint=NIKON, tile=64)
+    ref = b.reconstruct_pseudo_raw(img, checkpoint=NIKON, tile=0)
+    assert np.abs(out - ref).max() < 1 / 65535 / 20

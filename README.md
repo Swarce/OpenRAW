@@ -94,10 +94,17 @@ Run `openraw --help` for every option.
 ### Learned reconstruction (experimental)
 
 `--invisp` swaps the classical stages for **InvISP**, an invertible neural
-network, using upstream's Nikon or Canon checkpoints — or
-`--invisp-checkpoint best.pth` for a model you trained yourself on
-MIT-Adobe FiveK, locally or on Kaggle's free GPUs. Needs PyTorch:
-`pip install ".[invisp]"`. See [docs/invisp.md](docs/invisp.md).
+network. Needs PyTorch: `pip install ".[invisp]"`.
+
+```bash
+openraw photo.jpg --invisp-checkpoint pretrained/openraw-fivek-e46-latest.pth
+```
+
+`pretrained/` holds upstream's two single-camera models (`nikon.pth`,
+`canon.pth`) and OpenRAW's own, trained on many pooled MIT-Adobe FiveK
+cameras (`openraw-fivek-*.pth`, training still in progress). You can also
+train your own, locally or on Kaggle's free GPUs. What the models are and
+how they differ: [docs/invisp.md](docs/invisp.md).
 
 ## Tips
 

@@ -202,6 +202,9 @@ settings > CUDA - Sysmem Fallback Policy > Prefer No Sysmem Fallback.
 openraw photo.jpg --invisp-checkpoint exps/<task>/checkpoint/best.pth
 ```
 
+Snapshots of the pooled-FiveK run are kept in `pretrained/` — see
+[invisp.md](invisp.md) for what each one is.
+
 Any checkpoint `train.py` writes works (`best.pth`, `latest.pth`, `NNNN.pth`,
 or the full-state `latest_state.pth`). A file that doesn't fit the network is
 an error rather than a silent no-op -- upstream's loader skipped mismatched

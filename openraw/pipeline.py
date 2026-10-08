@@ -64,6 +64,7 @@ class PipelineConfig:
     invisp_pretrained_dir: str = "pretrained"
     invisp_device: str = "cpu"
     invisp_checkpoint: str | None = None  # any trained checkpoint; overrides camera/dir
+    invisp_tile: int = 512  # tiled inference (same result, ~1 GB peak); 0 = whole image
 
 
 @dataclass
@@ -94,6 +95,7 @@ class OpenRawPipeline:
                 pretrained_dir=cfg.invisp_pretrained_dir,
                 device=cfg.invisp_device,
                 checkpoint=cfg.invisp_checkpoint,
+                tile=cfg.invisp_tile,
             )
             # source_srgb_u8 must match linear's possibly-cropped shape
             # (reconstruct_pseudo_raw crops to even dimensions).

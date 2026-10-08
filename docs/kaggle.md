@@ -73,7 +73,9 @@ viewer trims old lines.
   probably a few sessions spread over one to two weeks of free quota. Each
   session's log prints epoch times and an ETA.
 - Use the result: download `best.pth` from the output and run
-  `openraw photo.jpg --invisp-checkpoint best.pth`.
+  `openraw photo.jpg --invisp-checkpoint best.pth`. (Kaggle may save a
+  `.pth` with a `.zip` extension — it is already the checkpoint, since a
+  `.pth` file is a zip internally; just rename it back.)
 
 ## How it's tested
 

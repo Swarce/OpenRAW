@@ -84,6 +84,14 @@ md5 against a fresh clone of the upstream repo — not retrained or
 modified). Per upstream's own README: each checkpoint is camera-specific
 and shouldn't be expected to generalize to other cameras' JPEGs.
 
+`pretrained/openraw-fivek-e35-best.pth` and
+`pretrained/openraw-fivek-e46-latest.pth` are **not** upstream's: they were
+trained by OpenRAW with this repository's `train.py` (InvISP's architecture,
+vendored MIT code) on images from the MIT-Adobe FiveK dataset
+(Bychkovsky, Paris, Chan & Durand, CVPR 2011). FiveK's images are under
+its own license terms, which should be checked before these weights are
+distributed publicly.
+
 InvISP's own README credits the invertible-block design it builds on to:
 
 > Mingqing Xiao, Shuxin Zheng, Chang Liu, Yaolong Wang, Di He, Guolin Ke,

@@ -101,6 +101,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="use this checkpoint instead of an upstream camera one -- e.g. the best.pth "
                         "(or latest_state.pth) from your own training run; implies --invisp")
     m.add_argument("--invisp-device", default="cpu", help="'cpu' or 'cuda:0' etc.")
+    m.add_argument("--invisp-tile", type=int, default=512, metavar="PX",
+                   help="run the network in tiles of this size: identical result, ~1 GB peak memory at any "
+                        "photo size (default 512). 0 = whole image at once (~1.8 GB per megapixel)")
     return p
 
 
@@ -118,6 +121,7 @@ def _config_from_args(a) -> PipelineConfig:
         invisp_pretrained_dir=a.invisp_pretrained_dir,
         invisp_device=a.invisp_device,
         invisp_checkpoint=a.invisp_checkpoint,
+        invisp_tile=a.invisp_tile,
         dng_compression=a.compression,
         dng_bit_depth=a.bit_depth,
         encode_threads=a.threads or None,

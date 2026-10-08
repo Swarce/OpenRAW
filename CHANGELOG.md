@@ -39,6 +39,10 @@ summarized; commit messages carry the full detail and measurements.
 ### Added — learned reconstruction (InvISP)
 - Optional InvISP (CVPR 2021) learned path, `--invisp`, with vendored
   upstream code and official checkpoints.
+- **OpenRAW-trained models** in `pretrained/`: `openraw-fivek-e35-best.pth`
+  (held-out raw PSNR 39.08 dB) and `openraw-fivek-e46-latest.pth`, snapshots
+  of a pooled-FiveK training run still in progress. Upstream's `nikon.pth` /
+  `canon.pth` stay alongside.
 - **`--invisp-checkpoint PATH`**: use a model you trained (`best.pth`,
   `latest.pth`, or the full-state `latest_state.pth`).
 
@@ -101,6 +105,10 @@ summarized; commit messages carry the full detail and measurements.
   integers.
 
 ### Fixed — InvISP and training
+- `--invisp` ran the whole photo through the network at once, needing ~1.8 GB
+  per megapixel (~32 GB for 18 MP) and getting killed on ordinary machines.
+  It now runs in 512 px tiles with a 96 px overlap (`--invisp-tile`): same
+  result to float rounding, ~1 GB peak at any size.
 - InvISP checkpoints loaded with `strict=False`, so a file that didn't match
   (e.g. a full-state checkpoint) silently loaded 0 of 280 weights and ran a
   random network. Missing weights are now an error.

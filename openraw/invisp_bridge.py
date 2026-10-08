@@ -124,18 +124,51 @@ def _load_net(camera: str, pretrained_dir: str, device, checkpoint: str | None =
     return net
 
 
+# Tiled inference. Each output pixel of InvISP depends only on input within
+# 80 px: a DenseBlock is 5 chained 3x3 convs (5 px), an InvBlock applies two
+# of them in sequence (10 px), 8 blocks; everything else is per-pixel (1x1
+# invertible conv, coupling arithmetic) -- no pooling or global normalisation.
+# So tiles with a >= 80 px margin, keeping only each tile's centre, reproduce
+# whole-image inference (verified to float rounding), at a fixed memory cost:
+# whole-image inference needs ~1.8 GB per megapixel (measured), ~32 GB for an
+# 18 MP photo -- more than most machines have.
+RECEPTIVE_RADIUS = 80
+TILE_MARGIN = 96
+DEFAULT_TILE = 512
+
+
+def _run_tiled(net, x, rev: bool, tile: int = DEFAULT_TILE, margin: int = TILE_MARGIN):
+    torch = _require_torch()
+    _, _, h, w = x.shape
+    if not tile or (h <= tile and w <= tile):
+        return net(x, rev=rev)
+    out = torch.empty_like(x)
+    for y0 in range(0, h, tile):
+        for x0 in range(0, w, tile):
+            y1, x1 = min(y0 + tile, h), min(x0 + tile, w)
+            ya, xa = max(0, y0 - margin), max(0, x0 - margin)
+            yb, xb = min(h, y1 + margin), min(w, x1 + margin)
+            res = net(x[:, :, ya:yb, xa:xb], rev=rev)
+            out[:, :, y0:y1, x0:x1] = res[:, :, y0 - ya:y0 - ya + (y1 - y0), x0 - xa:x0 - xa + (x1 - x0)]
+    return out
+
+
 def reconstruct_pseudo_raw(
     srgb_rgb: np.ndarray,
     camera: str = "NIKON_D700",
     pretrained_dir: str = "pretrained",
     device: str = "cpu",
     checkpoint: str | None = None,
+    tile: int = DEFAULT_TILE,
 ) -> np.ndarray:
     """
     srgb_rgb: float32 HxWx3 in [0, 1] -- e.g. decode.load_jpeg(path).rgb directly.
     camera: one of CAMERA_CHOICES -- must match a checkpoint in pretrained_dir.
     checkpoint: path to a specific checkpoint instead (e.g. your own trained
         best.pth); overrides camera and pretrained_dir.
+    tile: process in tiles of this size (px) with a 96 px overlap -- same
+        result as whole-image inference at ~1 GB peak memory. 0 = whole image
+        (~1.8 GB per megapixel).
     returns: float32 HxWx3 in [0, 1], scene-linear camera-native pseudo-RAW
         (gamma undone -- see module docstring). Feed this into
         bitdepth.expand_to_16bit() and dng_writer.write_linear_dng() the
@@ -160,7 +193,7 @@ def reconstruct_pseudo_raw(
 
     net = _load_net(camera, pretrained_dir, device, checkpoint)
     with torch.no_grad():
-        reconstructed = net(tensor, rev=True)
+        reconstructed = _run_tiled(net, tensor, rev=True, tile=tile)
         reconstructed = torch.clamp(reconstructed, 0.0, 1.0)
 
     raw_gamma = reconstructed.squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.float32)
