@@ -55,13 +55,14 @@ RAISE (8,156 Nikon raws; **non-commercial research use only**, see
 dataset:
 
 1. Get the CSV from the [RAISE download page](https://loki.disi.unitn.it/RAISE/download.html)
-   (pick a package, accept the terms). Upload it as a small Kaggle dataset
+   (pick a package, accept the terms). Upload it as a small **private** Kaggle dataset
    and attach it to a **new copy** of the notebook (its output must not mix
    with the training notebook's).
 2. In the config cell set `RAISE_CSV = True` (optionally `RAISE_CAMERAS = ["D90"]`).
    Accelerator **None**, Internet on, Save & Run All.
 3. It downloads and preprocesses images until the output reaches
-   `DATA_BUDGET_GB` (~1,100-1,400 images in 18 GB), deleting each NEF as it
+   `DATA_BUDGET_GB` (roughly 1,000 images in 18 GB; all 8,156 take about 8
+   parts), deleting each NEF as it
    goes. If images are left, the log says so and gives the `RAISE_START`
    value for preparing the next part in another copy of the notebook.
 4. Output → **New Dataset**, then attach it to the training notebook next to

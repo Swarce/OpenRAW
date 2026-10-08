@@ -110,9 +110,22 @@ def in_test_split(name: str) -> bool:
     return int(hashlib.sha1(name.encode()).hexdigest(), 16) % 100 < TEST_PERCENT
 
 
-def select(rows, cameras=(), categories=(), start=0, count=0):
+def _order_key(name: str) -> str:
+    return hashlib.sha1(b"order:" + name.encode()).hexdigest()
+
+
+def select(rows, cameras=(), categories=(), start=0, count=0, csv_order=False):
     """Filter by camera (substring of the model, e.g. 'D90') and category
-    keyword, then take rows[start:start+count] in the CSV's order."""
+    keyword, then take rows[start:start+count].
+
+    Rows are taken in a fixed shuffled order (by a hash of each name), not the
+    CSV's: RAISE's list runs in long same-camera, same-shoot stretches (one
+    stretch of 1,300 rows is all D90), so a part taken in list order would be
+    one camera and many near-identical burst frames. The shuffled order is the
+    same on every run and machine, so --start/--count parts never overlap.
+    csv_order: keep the list's order instead."""
+    if not csv_order:
+        rows = sorted(rows, key=lambda r: _order_key(r["name"]))
     if cameras:
         want = [fk.norm(c) for c in cameras]
         rows = [r for r in rows if any(w in fk.norm(r["device"]) for w in want)]
@@ -235,13 +248,16 @@ if __name__ == "__main__":
                     help="only rows whose category/keywords contain this, e.g. Outdoor (repeatable/comma)")
     ap.add_argument("--start", type=int, default=0, help="skip the first N selected rows (to prepare in parts)")
     ap.add_argument("--count", type=int, default=0, help="at most N images (default: all selected)")
+    ap.add_argument("--csv-order", action="store_true",
+                    help="take images in the CSV's order (default: a fixed shuffled order, so any part is a "
+                         "representative mix of cameras and scenes)")
     ap.add_argument("--list", action="store_true", help="show what's selected and exit")
     ap.add_argument("--data-path", default="./data/")
     ap.add_argument("-j", "--jobs", type=int, default=4, help="parallel downloads")
     ap.add_argument("--workers", type=int, default=0, help="preprocessing processes (default: all cores)")
     a = ap.parse_args()
     split = lambda xs: [x.strip() for v in xs for x in v.split(",") if x.strip()]  # noqa: E731
-    rows = select(read_list(a.csv), split(a.camera), split(a.category), a.start, a.count)
+    rows = select(read_list(a.csv), split(a.camera), split(a.category), a.start, a.count, a.csv_order)
     print(f"[raise] {len(rows)} image(s) selected" + (f" -- {summary(rows)}" if rows else ""))
     if a.list or not rows:
         sys.exit(0 if rows or a.list else 1)

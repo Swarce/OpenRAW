@@ -75,7 +75,11 @@ scenes and more sensors than FiveK alone. Its license allows
 
    `--camera`, `--category` (e.g. `Outdoor`), `--start` and `--count` pick a
    subset; re-running skips finished images, so a big list can be prepared
-   in parts. Each NEF goes through the same preprocessing as a FiveK DNG
+   in parts. Images are taken in a fixed shuffled order, not the CSV's: the
+   list runs in long single-camera, single-shoot stretches, so a part taken
+   in list order would be one camera and many near-identical burst frames.
+   The full list is D7000 ×5,804, D90 ×2,276, D40 ×76, and every part keeps
+   about that mix. Each NEF goes through the same preprocessing as a FiveK DNG
    (CFA pattern, black and white level read per file) into
    `data/RAISE_Nikon_D90/` etc. RAISE has no official split: ~10% of images
    go to test by a fixed hash of their name, so adding images later never

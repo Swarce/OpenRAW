@@ -66,9 +66,9 @@ def test_reads_the_list_and_selects_by_camera_category_and_range(raise_server):
     rows = rp.read_list(csv)
     assert [r["name"] for r in rows] == list(IMAGES)
     assert rows[0]["url"].endswith("/NEF/r0001aa.NEF") and rows[0]["device"] == "Nikon D90"
-    assert [r["name"] for r in rp.select(rows, cameras=["D90"])] == ["r0001aa", "r0002bb"]
-    assert [r["name"] for r in rp.select(rows, categories=["outdoor"])] == ["r0001aa", "r0003cc"]
-    assert [r["name"] for r in rp.select(rows, start=1, count=2)] == ["r0002bb", "r0003cc"]
+    assert sorted(r["name"] for r in rp.select(rows, cameras=["D90"])) == ["r0001aa", "r0002bb"]
+    assert sorted(r["name"] for r in rp.select(rows, categories=["outdoor"])) == ["r0001aa", "r0003cc"]
+    assert [r["name"] for r in rp.select(rows, start=1, count=2, csv_order=True)] == ["r0002bb", "r0003cc"]
     assert rp.camera_dir_name("NIKON D7000") == rp.camera_dir_name("Nikon D7000") == "RAISE_Nikon_D7000"
 
 
@@ -113,6 +113,19 @@ def test_preparing_in_parts_keeps_earlier_pairs_in_the_lists(raise_server):
     listed = set((data / "RAISE_Nikon_D90_train.txt").read_text().split()
                  + (data / "RAISE_Nikon_D90_test.txt").read_text().split())
     assert listed == {"r0001aa", "r0002bb"}
+
+
+def test_parts_are_a_mix_and_never_overlap():
+    """The real list runs in long same-camera stretches; parts must not."""
+    rows = [{"name": f"r{i:06x}", "url": "http://x", "category": "",
+             "device": "Nikon D90" if i < 3000 else "Nikon D7000"} for i in range(6000)]
+    parts = [rp.select(rows, start=s, count=1000) for s in range(0, 6000, 1000)]
+    names = [r["name"] for p in parts for r in p]
+    assert len(names) == len(set(names)) == 6000  # every image exactly once
+    for p in parts:
+        share_d90 = sum(r["device"] == "Nikon D90" for r in p) / len(p)
+        assert 0.4 < share_d90 < 0.6  # each part ~ the whole list's 50/50 mix
+    assert parts[0] == rp.select(list(reversed(rows)), start=0, count=1000)  # list order doesn't matter
 
 
 def test_test_split_is_about_ten_percent_and_stable():
