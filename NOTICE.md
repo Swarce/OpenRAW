@@ -88,9 +88,10 @@ and shouldn't be expected to generalize to other cameras' JPEGs.
 `pretrained/openraw-fivek-e46-latest.pth` are **not** upstream's: they were
 trained by OpenRAW with this repository's `train.py` (InvISP's architecture,
 vendored MIT code) on images from the MIT-Adobe FiveK dataset
-(Bychkovsky, Paris, Chan & Durand, CVPR 2011). FiveK's images are under
-its own license terms, which should be checked before these weights are
-distributed publicly.
+(Bychkovsky, Paris, Chan & Durand, CVPR 2011), whose images are licensed
+for research use only. These weights are therefore offered for
+**non-commercial research use**, unlike the MIT-licensed code; see
+"Training data" below.
 
 InvISP's own README credits the invertible-block design it builds on to:
 
@@ -129,19 +130,77 @@ attribution section here, done the same way — not folded into this one.
 
 ## Training data
 
-Training data is not included in this repository; the scripts download it
-from each dataset's own server, under that dataset's own terms:
+No training images are included in this repository. The scripts download
+them from each dataset's own server, under that dataset's own terms. If you
+publish results from a model trained with this project, cite the datasets it
+was trained on.
 
-- **MIT-Adobe FiveK** (Bychkovsky, Paris, Chan & Durand, CVPR 2011) —
-  `data/fivek_download.py`, `data/fivek_prepare.py`.
-- **RAISE** (Dang-Nguyen, Pasquini, Conotter & Boato, "RAISE: A Raw Images
-  Dataset for Digital Image Forensics", ACM MMSys 2015) —
-  `data/raise_prepare.py`. RAISE's terms: *"to be used for non-commercial
-  research and educational purposes"*, and published work using it should
-  cite the paper. The list of download links comes from
-  <https://loki.disi.unitn.it/RAISE/>, where the terms are accepted. A model
-  trained on RAISE images falls under those terms; none of the weights in
-  `pretrained/` have been trained on RAISE so far.
+### MIT-Adobe FiveK
+
+Used by `data/fivek_download.py`, `data/fivek_prepare.py` and the Kaggle
+notebook; `openraw-fivek-*.pth` were trained on it, and so were upstream's
+`canon.pth` / `nikon.pth` (its Canon EOS 5D and Nikon D700 subsets).
+
+> Vladimir Bychkovsky, Sylvain Paris, Eric Chan, Frédo Durand.
+> **Learning Photographic Global Tonal Adjustment with a Database of
+> Input / Output Image Pairs.** CVPR 2011.
+> <https://data.csail.mit.edu/graphics/fivek/>
+
+```bibtex
+@inproceedings{fivek,
+  author    = {Vladimir Bychkovsky and Sylvain Paris and Eric Chan and Fr{\'e}do Durand},
+  title     = {Learning Photographic Global Tonal Adjustment with a Database of Input / Output Image Pairs},
+  booktitle = {The Twenty-Fourth IEEE Conference on Computer Vision and Pattern Recognition},
+  year      = {2011}
+}
+```
+
+**Terms.** FiveK's images are under two licenses, each covering the files
+listed with it on the dataset page: [LicenseAdobe](https://data.csail.mit.edu/graphics/fivek/legal/LicenseAdobe.txt)
+(© 2011 Adobe Systems Incorporated) and
+[LicenseAdobeMIT](https://data.csail.mit.edu/graphics/fivek/legal/LicenseAdobeMIT.txt)
+(© 2011 Adobe Systems Incorporated and Massachusetts Institute of
+Technology). Both allow using, copying, modifying and distributing the
+images **solely for research purposes**, not for commercial advantage or
+monetary compensation; require the copyright notice and license to go with
+any copy of the images; and forbid using Adobe's, MIT's or their
+contributors' names to endorse or promote derived products. Naming FiveK
+here is attribution of the training data, not an endorsement by Adobe or
+MIT. This repository contains no FiveK images (the split lists in `data/`
+hold image IDs only).
+
+### RAISE
+
+Used by `data/raise_prepare.py`; none of the weights in `pretrained/` have
+been trained on it so far.
+
+> Duc-Tien Dang-Nguyen, Cecilia Pasquini, Valentina Conotter, Giulia Boato.
+> **RAISE: A Raw Images Dataset for Digital Image Forensics.** ACM
+> Multimedia Systems (MMSys), Portland, Oregon, 2015.
+> <https://loki.disi.unitn.it/RAISE/>
+
+```bibtex
+@inproceedings{raise,
+  author    = {Duc-Tien Dang-Nguyen and Cecilia Pasquini and Valentina Conotter and Giulia Boato},
+  title     = {{RAISE}: A Raw Images Dataset for Digital Image Forensics},
+  booktitle = {Proceedings of the 6th ACM Multimedia Systems Conference (MMSys)},
+  address   = {Portland, Oregon},
+  year      = {2015}
+}
+```
+
+**Terms.** *"The RAISE dataset is to be used for non-commercial research and
+educational purposes. If using the dataset in any published work, please
+cite its related publication."* The image list (CSV) is obtained from the
+RAISE download page, where the terms are accepted; it isn't included here.
+
+### What this means for the weights
+
+The code in this repository is MIT licensed. The trained weights are a
+different matter: they're learned from images licensed for research only.
+OpenRAW therefore offers every checkpoint in `pretrained/` — upstream's and
+its own — for **non-commercial research use**, and a model you train on
+FiveK or RAISE with these scripts carries the same expectation.
 
 ## Logo font: Saira (SIL Open Font License 1.1)
 

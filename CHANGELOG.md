@@ -97,6 +97,9 @@ summarized; commit messages carry the full detail and measurements.
   Kaggle-runner tests run (they were skipped in every other job); job
   timeouts; docs-only changes skip the test jobs and get a Markdown link
   check (`tools/check_links.py`) instead. Dependabot for GitHub Actions.
+- Dataset credits: FiveK and RAISE citations (BibTeX) and license terms in
+  `NOTICE.md`, summarized in the README; the trained weights are marked for
+  non-commercial research use, since both datasets are research-only.
 - Repository: `.gitattributes` (LF line endings on every OS, binary files
   marked, vendored code excluded from language statistics), `.gitignore`
   covering training data/outputs and editor files, issue forms and a PR

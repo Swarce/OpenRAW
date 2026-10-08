@@ -32,6 +32,10 @@ Weights aren't part of the installed package — see licensing below.
 | `openraw-fivek-e35-best.pth` | OpenRAW | pooled FiveK cameras (~1,070 images) | epoch 35 of 182, batch 1 | **39.08 dB** |
 | `openraw-fivek-e46-latest.pth` | OpenRAW | same | epoch 46 of 182, batch 1 | not yet measured |
 
+All four are trained on MIT-Adobe FiveK images, which are licensed for
+research only, so the weights are offered for **non-commercial research
+use** (the code is MIT). Citations and terms: [NOTICE.md](../NOTICE.md#training-data).
+
 What the differences mean in practice:
 
 - **Single camera vs pooled.** The upstream models each learned *one*

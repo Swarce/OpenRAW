@@ -129,3 +129,10 @@ how they differ: [docs/invisp.md](docs/invisp.md).
 MIT licensed — see [LICENSE](LICENSE). Includes vendored code from
 **InvISP** (Xing, Qian & Chen, CVPR 2021, MIT); full attribution in
 [NOTICE.md](NOTICE.md).
+
+The InvISP models are trained on the **MIT-Adobe FiveK** dataset
+(Bychkovsky, Paris, Chan & Durand, CVPR 2011), and training can also use
+**RAISE** (Dang-Nguyen, Pasquini, Conotter & Boato, ACM MMSys 2015). Both
+datasets are licensed for research only, so the weights in `pretrained/` are
+offered for **non-commercial research use**, unlike the code. Citations and
+terms: [NOTICE.md](NOTICE.md#training-data).
