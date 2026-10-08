@@ -1,0 +1,253 @@
+"""
+OpenRAW on Kaggle: unattended InvISP training across free GPU sessions.
+
+One notebook (kaggle/openraw_kaggle.ipynb) calls run(); what happens depends
+on what's attached to it:
+
+  PREPARE mode -- no prepared data attached. Downloads the chosen FiveK
+    cameras, preprocesses them into the compact training format, deletes each
+    DNG right after, and writes everything to /kaggle/working/openraw-data/,
+    staying under the 20 GB Kaggle keeps between sessions. Run it on CPU (no
+    GPU quota spent), then turn the output into a Kaggle Dataset (one click).
+
+  TRAIN mode -- one or more prepared datasets attached. Merges them, resumes
+    from the previous session's checkpoint if the notebook's own last output is
+    attached, trains until shortly before the 12 h session limit, stops cleanly
+    between epochs, and leaves checkpoints + eval.csv + best.pth in
+    /kaggle/working for the next session.
+
+Kaggle limits this is built around: 12 h per GPU session, ~30 GPU h/week,
+20 GB saved in /kaggle/working (scratch space elsewhere is wiped).
+
+Paths come from environment variables so the logic is testable off Kaggle.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+INPUT = Path(os.environ.get("KAGGLE_INPUT", "/kaggle/input"))
+WORKING = Path(os.environ.get("KAGGLE_WORKING", "/kaggle/working"))
+SCRATCH = Path(os.environ.get("KAGGLE_SCRATCH", "/tmp/openraw"))  # wiped between sessions; fine for symlinks
+
+SESSION_HOURS = 12.0      # Kaggle GPU session limit
+SAVE_MARGIN_HOURS = 0.75  # leave time for Kaggle to save /kaggle/working
+DATA_DIR = "openraw-data"
+UPSTREAM_STEPS = 195_000  # InvISP's training budget: 650 images x 300 epochs
+EST_PAIR_MB = 15.0        # compact pair (mosaic + JPEG target) before measuring
+
+
+def log(*a):
+    print("[kaggle]", *a, flush=True)
+
+
+# --------------------------------------------------------------------- data
+def find_data_roots(root: Path = None, max_depth: int = 4) -> list[Path]:
+    """Prepared-data roots under `root`: folders holding <Camera>_train.txt
+    next to a <Camera>/RAW/ folder of .npz pairs."""
+    root = Path(root or INPUT)
+    found = []
+    if not root.is_dir():
+        return found
+    for dirpath, dirnames, filenames in os.walk(root):
+        d = Path(dirpath)
+        if len(d.relative_to(root).parts) > max_depth:
+            dirnames[:] = []
+            continue
+        cams = [f[: -len("_train.txt")] for f in filenames if f.endswith("_train.txt")]
+        if any((d / c / "RAW").is_dir() and any((d / c / "RAW").glob("*.npz")) for c in cams):
+            found.append(d)
+            dirnames[:] = []  # don't descend into a data root's camera folders
+    return sorted(found)
+
+
+def merge_data(roots: list[Path], dest: Path) -> list[str]:
+    """Combine several prepared datasets (read-only Kaggle inputs) into one
+    writable data root of symlinks + copied split lists. Returns camera names."""
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    cams = []
+    for r in roots:
+        meta = r / "fivek" / "_metadata"
+        if meta.is_dir() and not (dest / "fivek" / "_metadata").exists():
+            shutil.copytree(meta, dest / "fivek" / "_metadata")
+        for lst in sorted(r.glob("*_train.txt")):
+            cam = lst.name[: -len("_train.txt")]
+            if not (r / cam / "RAW").is_dir():
+                continue
+            if (dest / cam).exists():
+                log(f"camera {cam} appears in more than one dataset -- using the first ({dest / cam})")
+                continue
+            (dest / cam).symlink_to(r / cam, target_is_directory=True)
+            for split in ("train", "test"):
+                src = r / f"{cam}_{split}.txt"
+                if src.exists():
+                    shutil.copy(src, dest / f"{cam}_{split}.txt")
+            cams.append(cam)
+    return cams
+
+
+def count_train_pairs(data_root: Path) -> int:
+    n = 0
+    for lst in Path(data_root).glob("*_train.txt"):
+        cam = lst.name[: -len("_train.txt")]
+        names = [x.strip() for x in lst.read_text().split() if x.strip()]
+        n += sum((Path(data_root) / cam / "RAW" / f"{x}.npz").exists() for x in names)
+    return n
+
+
+def suggest_epochs(n_train: int) -> int:
+    """Epochs matching upstream InvISP's ~195k-step budget for this dataset."""
+    return max(1, round(UPSTREAM_STEPS / max(1, n_train)))
+
+
+# --------------------------------------------------------------- checkpoints
+def find_checkpoint(task: str, root: Path = None) -> Path | None:
+    """The checkpoint folder of `task` in an attached input (the notebook's own
+    previous output), preferring a full-state checkpoint, newest first."""
+    root = Path(root or INPUT)
+    hits = []
+    for name in ("latest_state.pth", "latest.pth"):
+        for p in root.rglob(f"exps/{task}/checkpoint/{name}"):
+            hits.append((name == "latest_state.pth", p.stat().st_mtime, p.parent))
+        if hits:
+            break
+    return max(hits)[2] if hits else None
+
+
+def restore_checkpoint(ckpt_dir: Path, out_path: Path, task: str) -> Path:
+    """Copy the previous session's checkpoints + eval.csv into the writable
+    output folder, where train.py --resume looks for them."""
+    dst = Path(out_path) / task / "checkpoint"
+    dst.mkdir(parents=True, exist_ok=True)
+    for f in Path(ckpt_dir).iterdir():
+        if f.is_file():
+            shutil.copy2(f, dst / f.name)
+    ev = Path(ckpt_dir).parent / "eval.csv"
+    if ev.exists():
+        shutil.copy2(ev, dst.parent / "eval.csv")
+    return dst
+
+
+# ------------------------------------------------------------------ prepare
+def _du_gb(p: Path) -> float:
+    return sum(f.stat().st_size for f in Path(p).rglob("*") if f.is_file()) / 1e9
+
+
+def prepare(cameras="all", budget_gb: float = 18.0, out: Path = None, jobs: int = 4, workers: int | None = None):
+    """Download + preprocess cameras into out (default /kaggle/working/
+    openraw-data), camera by camera, never starting one that would push the
+    total past budget_gb (Kaggle keeps 20 GB). DNGs are deleted as they're
+    processed. Returns the camera folders prepared."""
+    sys.path.insert(0, str(REPO / "data"))
+    import fivek_download as fk
+    import fivek_prepare as fp
+
+    out = Path(out or WORKING / DATA_DIR)
+    out.mkdir(parents=True, exist_ok=True)
+    items = fk.load_metadata(out / "fivek" / "_metadata", list(fk.SPLIT_FILES))
+    index = fk.build_camera_index(items)
+    if cameras == "all":
+        labels = sorted(index, key=lambda l: -len(index[l]))  # biggest cameras first
+    else:
+        labels = fk.resolve_cameras(list(cameras), index)
+
+    done_cams, pairs_before = [], 0
+    for label in labels:
+        used = _du_gb(out)
+        n_pairs = sum(1 for _ in out.glob("*/RAW/*.npz"))
+        per_pair = (used * 1e3 / n_pairs) if n_pairs else EST_PAIR_MB
+        need = len(index[label]) * per_pair / 1e3
+        if used + need > budget_gb:
+            log(f"skipping {label}: ~{need:.1f} GB would exceed the {budget_gb:.0f} GB budget ({used:.1f} GB used)")
+            continue
+        log(f"preparing {label} ({len(index[label])} images, ~{need:.1f} GB) ...")
+        # Run as its own process via fivek_prepare.py's CLI (which has a proper
+        # __main__ guard): its preprocessing pool uses spawn, which re-imports
+        # the parent's main module in every worker -- calling it in-process
+        # from an unguarded script or pipe crashed the pool in testing.
+        cmd = [sys.executable, str(REPO / "data" / "fivek_prepare.py"), "--camera", label, "--download",
+               "--delete-dngs", "--data-path", str(out) + "/", "--jobs", str(jobs)]
+        if workers:
+            cmd += ["--workers", str(workers)]
+        if subprocess.call(cmd) != 0:
+            log(f"preparing {label} failed -- continuing with the other cameras")
+            continue
+        done_cams.append(fp.camera_dir_name(label))
+    shutil.rmtree(out / "fivek" / "raw", ignore_errors=True)  # emptied by --delete-dngs
+    log(f"prepared {len(done_cams)} camera(s), {sum(1 for _ in out.glob('*/RAW/*.npz'))} pairs, "
+        f"{_du_gb(out):.1f} GB in {out}")
+    return done_cams
+
+
+# -------------------------------------------------------------------- train
+def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hours: float | None = None,
+          workers: int = 3, extra_args: list[str] | None = None, session_start: float | None = None) -> int:
+    """Run train.py on all cameras in data_root, resuming if a checkpoint is in
+    the output folder, within the remaining session time. Returns its exit code."""
+    out_path = WORKING / "exps"
+    n = count_train_pairs(data_root)
+    epochs = epochs or suggest_epochs(n)
+    if time_limit_hours is None:
+        elapsed = (time.time() - session_start) / 3600 if session_start else 0.0
+        time_limit_hours = max(0.25, SESSION_HOURS - SAVE_MARGIN_HOURS - elapsed)
+    resume = (out_path / task / "checkpoint" / "latest_state.pth").exists() or \
+             (out_path / task / "checkpoint" / "latest.pth").exists()
+    cmd = [sys.executable, "train.py", "--task", task, "--all-downloaded", "--gamma", "--aug",
+           "--data_path", str(data_root) + "/", "--out_path", str(out_path) + "/",
+           "--epochs", str(epochs), "--workers", str(workers),
+           "--time_limit_hours", f"{time_limit_hours:.3f}"] + (["--resume"] if resume else []) + (extra_args or [])
+    log(f"{n} training pairs -> {epochs} epochs (~{n * epochs:,} steps); "
+        f"time budget {time_limit_hours:.2f} h; {'resuming' if resume else 'fresh start'}")
+    log(" ".join(cmd))
+    return subprocess.call(cmd, cwd=str(REPO))
+
+
+def write_status(task: str, epochs: int) -> str:
+    """Leave a one-line STATUS.txt in the output saying whether to run again."""
+    import torch
+    st_path = WORKING / "exps" / task / "checkpoint" / "latest_state.pth"
+    msg = "no checkpoint yet"
+    if st_path.exists():
+        st = torch.load(st_path, map_location="cpu", weights_only=False)
+        done = st["epoch"] + 1
+        best = st.get("best_raw_psnr", -1)
+        state = "DONE" if done >= epochs else "RUN AGAIN to continue"
+        msg = f"{state}: {done}/{epochs} epochs, step {st['step']:,}" + (f", best raw PSNR {best:.2f} dB" if best > 0 else "")
+    (WORKING / "STATUS.txt").write_text(msg + "\n")
+    log(msg)
+    return msg
+
+
+# ---------------------------------------------------------------------- main
+def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, session_start=None,
+        extra_train_args=None):
+    session_start = session_start or time.time()
+    roots = find_data_roots(INPUT)
+    if not roots:
+        log("no prepared data attached -> PREPARE mode")
+        prepare(cameras, budget_gb=budget_gb)
+        log("Next: 'Save Version' finishes, then on this notebook's output page choose 'New Dataset', and "
+            "attach that dataset to this notebook (Add Input). The next run trains.")
+        return "prepared"
+    log(f"prepared data found: {', '.join(str(r) for r in roots)} -> TRAIN mode")
+    data_root = SCRATCH / DATA_DIR
+    shutil.rmtree(data_root, ignore_errors=True)
+    cams = merge_data(roots, data_root)
+    log(f"cameras: {', '.join(cams)}")
+    ck = find_checkpoint(task, INPUT)
+    if ck:
+        restore_checkpoint(ck, WORKING / "exps", task)
+        log(f"restored checkpoint from {ck}")
+    n = count_train_pairs(data_root)
+    epochs = epochs or suggest_epochs(n)
+    code = train(task, data_root, epochs=epochs, workers=workers, session_start=session_start,
+                 extra_args=extra_train_args)
+    write_status(task, epochs)
+    return "trained" if code == 0 else f"train.py exited with code {code}"

@@ -105,6 +105,7 @@ Run `openraw --help` for every option.
 - [DNG format notes](docs/dng-format.md) — how files are written, and what was tested against what
 - [InvISP network](docs/invisp.md) — the optional learned reconstruction path
 - [Training](docs/training.md) — training InvISP on MIT-Adobe FiveK
+- [Training on Kaggle](docs/kaggle.md) — free GPUs, unattended, resumes across sessions
 - [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
 ## Credits & license

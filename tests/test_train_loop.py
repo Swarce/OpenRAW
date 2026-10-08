@@ -50,7 +50,7 @@ def trainer(tmp_path, monkeypatch):
     def run(**over):
         kw = dict(task="t", data_path=str(data) + "/", batch_size=1, debug_mode=False, gamma=True, camera=cams,
                   rgb_weight=1, out_path=out, resume=False, loss="L1", lr=1e-4, aug=True, workers=1,
-                  epochs=1, start_epoch=None, device="cpu", eval_every=0, eval_images=40, eval_crop=512)
+                  epochs=1, start_epoch=None, device="cpu", eval_every=0, eval_images=40, eval_crop=512, time_limit_hours=0)
         kw.update(over)
         train.main(SimpleNamespace(**kw))
         return train._load(out + "t/checkpoint/latest_state.pth", "cpu")
@@ -161,3 +161,14 @@ def test_eval_crop_matches_full_frame_crop(tmp_path):
     assert c["input_raw"].shape[1:] == (128, 128)
     assert torch.allclose(c["input_raw"], full["input_raw"][:, y:y + 128, x:x + 128], atol=1e-6)
     assert torch.equal(c["target_rgb"], full["target_rgb"][:, y:y + 128, x:x + 128])
+
+
+
+def test_time_limit_stops_between_epochs_and_resume_continues(trainer):
+    """A session time budget (e.g. Kaggle's 12 h) must stop the run cleanly
+    after a completed, saved epoch -- and --resume must pick up from there."""
+    run, _ = trainer
+    st = run(epochs=5, time_limit_hours=1e-6)  # any real epoch exceeds this budget
+    assert st["epoch"] == 0 and st["step"] == 2  # stopped after the first epoch, saved
+    st = run(epochs=5, resume=True, time_limit_hours=1e-6)
+    assert st["epoch"] == 1 and st["step"] == 4  # one more epoch per "session"

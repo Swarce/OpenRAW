@@ -37,6 +37,9 @@ if __name__ == "__main__":
                         help="data-loading worker processes (default: up to 8). Loading an 18 MP pair takes "
                              "~0.3-0.5 s of CPU; with 0 workers the GPU mostly waits on it.")
     parser.add_argument("--epochs", type=int, default=300, help="total epochs (upstream: 300)")
+    parser.add_argument("--time_limit_hours", type=float, default=0,
+                        help="stop cleanly after the last epoch that fits in this many hours (checkpoint saved; "
+                             "--resume continues). For time-limited sessions such as Kaggle's 12 h. 0 = no limit")
     parser.add_argument("--start_epoch", type=int, default=None,
                         help="with --resume on a weights-only checkpoint (made before full-state "
                              "checkpoints existed): the epoch to continue from")
@@ -346,6 +349,17 @@ def main(args):
         left = (time.time() - run_start) / epochs_done * (args.epochs - epoch - 1)
         print("[INFO] Epoch %d time: %.1fs | ETA for remaining %d epoch(s): %.1f h | task: %s" % (
             epoch, took, args.epochs - epoch - 1, left / 3600, args.task))
+        # PATCHED (OpenRAW): time budget. Stop BETWEEN epochs -- the checkpoint for
+        # this one is already saved -- if the next one (with a 15% margin for an
+        # evaluation pass) wouldn't finish in time, instead of being killed mid-save.
+        limit = getattr(args, "time_limit_hours", 0) or 0
+        if limit and epoch < args.epochs - 1:
+            elapsed = time.time() - run_start
+            per_epoch = elapsed / epochs_done
+            if elapsed + 1.15 * per_epoch > limit * 3600:
+                print(f"[INFO] time limit: stopping after epoch {epoch} ({elapsed / 3600:.2f} h used of "
+                      f"{limit:.2f} h; next epoch needs ~{per_epoch / 3600:.2f} h). Continue with --resume.")
+                break
 
 if __name__ == '__main__':
 
