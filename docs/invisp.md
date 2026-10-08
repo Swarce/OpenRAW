@@ -51,14 +51,24 @@ What the differences mean in practice:
   crops of the test split). The upstream models haven't been scored on it
   yet, so the table can't rank OpenRAW's models against them. Upstream's paper
   numbers use a different setup and aren't comparable either.
-- **On a real (non-Nikon, non-Canon) photo**, the OpenRAW models land between
-  the two upstream ones — `e35-best` is closest to `nikon.pth` — while
-  `canon.pth` adds a visible magenta cast: the single-camera bias in action.
-  All four look flatter than the JPEG; that's expected, since a raw has no
-  tone curve or saturation boost until your editor applies one. Without a
-  true raw for that photo this shows how the models differ, not which is right.
 - Training continues; these files will be replaced by later snapshots, then a
   final model.
+
+### On a real photo
+
+![Parrot crop: source JPEG, then the raw output of each model](../examples/invisp_models_compared.jpg)
+
+*A 5 MP photo, most likely from a Nikon Coolpix compact (its `DSCN` file
+naming; the EXIF was stripped), so neither of the upstream models' training
+cameras: the source JPEG, then each model's raw output, rendered without a
+tone curve.*
+
+The OpenRAW models land between the two upstream ones — `e35-best` is
+closest to `nikon.pth` — while `canon.pth` adds a visible magenta cast: the
+single-camera bias in action. All four look flatter than the JPEG; that's
+expected, since a raw has no tone curve or saturation boost until your editor
+applies one. Without a true raw for this photo, it shows how the models
+differ, not which one is right.
 
 Any checkpoint `train.py` writes also works with `--invisp-checkpoint`
 (`best.pth`, `latest.pth`, `NNNN.pth`, or the full-state `latest_state.pth`).
