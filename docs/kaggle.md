@@ -5,7 +5,7 @@ many 12-hour sessions as it takes, resuming automatically. One notebook, two
 modes picked from what's attached to it.
 
 Kaggle limits it's built around: **12 h per GPU session**, **~30 GPU hours per
-week**, **20 GB** of saved output per run (other disk space is wiped).
+week** (TPU quota is separate, but InvISP isn't ported to TPUs), **20 GB** of saved output per run (other disk space is wiped).
 
 ## One-time setup
 
@@ -31,8 +31,8 @@ week**, **20 GB** of saved output per run (other disk space is wiped).
 ## Runs 2, 3, … — train (GPU)
 
 - **Add Input** → your new dataset.
-- Settings → Accelerator **GPU P100** (one GPU; with "T4 x2" the second GPU
-  would sit idle).
+- Settings → Accelerator **GPU T4 x2** (or P100 if your account offers it).
+  Training currently uses one GPU, so with T4 x2 the second one sits idle.
 - **Save & Run All (Commit)**. It trains until ~11¼ h into the session, stops
   cleanly *between* epochs, and saves checkpoints, `eval.csv` and `best.pth`.
 - To continue: **Add Input → this notebook's own latest output** (if it's
