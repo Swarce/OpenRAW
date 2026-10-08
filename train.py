@@ -230,7 +230,12 @@ def _worker(rank, world, args, port):
         torch.cuda.set_device(rank)
         args.device = f"cuda:{rank}"
     os.environ.update(MASTER_ADDR="127.0.0.1", MASTER_PORT=str(port))
-    dist.init_process_group("nccl" if cuda else "gloo", rank=rank, world_size=world)
+    from datetime import timedelta
+    # A collective that never completes (e.g. a broken GPU interconnect) raises
+    # after this long instead of hanging the session. Generous enough for rank
+    # 0's per-epoch evaluation + saves, during which the others wait.
+    dist.init_process_group("nccl" if cuda else "gloo", rank=rank, world_size=world,
+                            timeout=timedelta(minutes=15))
     if rank:  # only rank 0 talks; the others' output would duplicate it
         import builtins
         builtins.print = lambda *a, **k: None
@@ -251,7 +256,8 @@ def launch(args):
         sk.bind(("127.0.0.1", 0))
         port = sk.getsockname()[1]
     print(f"[INFO] multi-GPU: {world} processes, one per {'GPU' if args.device.startswith('cuda') else 'CPU process'}; "
-          f"effective batch size {world * args.batch_size}")
+          f"effective batch size {world * args.batch_size}"
+          + ("; NCCL_P2P_DISABLE=1" if os.environ.get("NCCL_P2P_DISABLE") == "1" else ""), flush=True)
     mp.spawn(_worker, args=(world, args, port), nprocs=world, join=True)
 
 

@@ -187,28 +187,86 @@ def prepare(cameras="all", budget_gb: float = 18.0, out: Path = None, jobs: int 
 
 
 # -------------------------------------------------------------------- train
+def _gpu_count() -> int:
+    try:
+        import torch
+        return torch.cuda.device_count()
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _selftest(env: dict, timeout: float = 240) -> bool:
+    """tools/multigpu_selftest.py in a subprocess, killed after `timeout` s: a
+    broken interconnect hangs rather than failing."""
+    try:
+        r = subprocess.run([sys.executable, str(REPO / "tools" / "multigpu_selftest.py")], env=env,
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        log(f"multi-GPU self-test: no response within {timeout:.0f}s (hung)")
+        return False
+    ok = r.returncode == 0 and "SELFTEST OK" in r.stdout
+    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
+    log(f"multi-GPU self-test: {'passed' if ok else 'FAILED'} -- {tail[0][:200]}")
+    return ok
+
+
+def choose_gpus(gpus: int, env: dict) -> tuple[int, dict]:
+    """Decide how many GPUs to train on, and with which NCCL settings, by
+    testing GPU-to-GPU communication first. The first two-GPU session on Kaggle
+    produced no output for hours -- consistent with a collective hanging.
+    Order: as-is, then NCCL_P2P_DISABLE=1 (the usual fix when peer-to-peer
+    over PCIe is broken on cloud VMs), then one GPU."""
+    n = _gpu_count() if gpus == 0 else gpus
+    if n < 2:
+        return 1, env
+    if _selftest(env):
+        return n, env
+    env2 = dict(env, NCCL_P2P_DISABLE="1")
+    if _selftest(env2):
+        log("multi-GPU works with NCCL_P2P_DISABLE=1 -- training with it")
+        return n, env2
+    log("multi-GPU communication doesn't work on this machine -- training on 1 GPU")
+    return 1, env
+
+
 def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hours: float | None = None,
           workers: int = 3, extra_args: list[str] | None = None, session_start: float | None = None,
           gpus: int = 0) -> int:
     """Run train.py on all cameras in data_root, resuming if a checkpoint is in
     the output folder, within the remaining session time. gpus: 0 = every GPU
-    the session has (both on "GPU T4 x2"). Returns its exit code."""
+    the session has (both on "GPU T4 x2"), after a communication self-test.
+    A multi-GPU run that fails is retried once on one GPU, resuming from the
+    last saved epoch. Returns train.py's exit code."""
     out_path = WORKING / "exps"
     n = count_train_pairs(data_root)
     epochs = epochs or suggest_epochs(n)
-    if time_limit_hours is None:
-        elapsed = (time.time() - session_start) / 3600 if session_start else 0.0
-        time_limit_hours = max(0.25, SESSION_HOURS - SAVE_MARGIN_HOURS - elapsed)
-    resume = (out_path / task / "checkpoint" / "latest_state.pth").exists() or \
-             (out_path / task / "checkpoint" / "latest.pth").exists()
-    cmd = [sys.executable, "train.py", "--task", task, "--all-downloaded", "--gamma", "--aug",
-           "--data_path", str(data_root) + "/", "--out_path", str(out_path) + "/",
-           "--epochs", str(epochs), "--workers", str(workers), "--gpus", str(gpus),
-           "--time_limit_hours", f"{time_limit_hours:.3f}"] + (["--resume"] if resume else []) + (extra_args or [])
-    log(f"{n} training pairs -> {epochs} epochs (~{n * epochs:,} steps); "
-        f"time budget {time_limit_hours:.2f} h; {'resuming' if resume else 'fresh start'}")
-    log(" ".join(cmd))
-    return subprocess.call(cmd, cwd=str(REPO))
+    # unbuffered: output from train.py and its per-GPU processes appears live
+    # in Kaggle's log (buffered output is invisible until a buffer fills or the
+    # process exits -- a stalled run then shows nothing at all)
+    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    gpus, env = choose_gpus(gpus, env)
+
+    def run_once(n_gpus: int) -> int:
+        limit = time_limit_hours
+        if limit is None:
+            elapsed = (time.time() - session_start) / 3600 if session_start else 0.0
+            limit = max(0.25, SESSION_HOURS - SAVE_MARGIN_HOURS - elapsed)
+        resume = (out_path / task / "checkpoint" / "latest_state.pth").exists() or \
+                 (out_path / task / "checkpoint" / "latest.pth").exists()
+        cmd = [sys.executable, "train.py", "--task", task, "--all-downloaded", "--gamma", "--aug",
+               "--data_path", str(data_root) + "/", "--out_path", str(out_path) + "/",
+               "--epochs", str(epochs), "--workers", str(workers), "--gpus", str(n_gpus),
+               "--time_limit_hours", f"{limit:.3f}"] + (["--resume"] if resume else []) + (extra_args or [])
+        log(f"{n} training pairs -> {epochs} epochs (~{n * epochs:,} steps); {n_gpus} GPU(s); "
+            f"time budget {limit:.2f} h; {'resuming' if resume else 'fresh start'}")
+        log(" ".join(cmd))
+        return subprocess.call(cmd, cwd=str(REPO), env=env)
+
+    code = run_once(gpus)
+    if code != 0 and gpus > 1:
+        log(f"multi-GPU training exited with code {code} -- retrying on 1 GPU from the last saved epoch")
+        code = run_once(1)
+    return code
 
 
 def write_status(task: str, epochs: int) -> str:

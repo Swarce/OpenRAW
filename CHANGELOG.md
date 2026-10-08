@@ -113,6 +113,12 @@ summarized; commit messages carry the full detail and measurements.
   integers.
 
 ### Fixed — InvISP and training
+- The first two-GPU Kaggle session produced no output for hours — consistent
+  with GPU-to-GPU communication hanging. The Kaggle runner now self-tests
+  communication first (`tools/multigpu_selftest.py`), retries with
+  `NCCL_P2P_DISABLE=1`, then falls back to one GPU; training collectives time
+  out after 15 minutes; a failed multi-GPU run is retried on one GPU; and
+  training output is unbuffered so logs stream live.
 - `--invisp` ran the whole photo through the network at once, needing ~1.8 GB
   per megapixel (~32 GB for 18 MP) and getting killed on ordinary machines.
   It now runs in 512 px tiles with a 96 px overlap (`--invisp-tile`): same

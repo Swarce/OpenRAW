@@ -99,10 +99,12 @@ def test_train_builds_the_right_command(kaggle, monkeypatch):
     kr.prepare("all", budget_gb=5)
     data = kaggle / "working" / kr.DATA_DIR
     seen = {}
-    monkeypatch.setattr(kr.subprocess, "call", lambda cmd, cwd: seen.update(cmd=cmd, cwd=cwd) or 0)
+    monkeypatch.setattr(kr.subprocess, "call", lambda cmd, cwd, env: seen.update(cmd=cmd, cwd=cwd, env=env) or 0)
+    monkeypatch.setattr(kr, "_gpu_count", lambda: 1)
     kr.train("t", data, epochs=7, session_start=__import__("time").time() - 3600)  # 1 h already used
     cmd = seen["cmd"]
     assert cmd[1] == "train.py" and "--all-downloaded" in cmd and "--resume" not in cmd
+    assert seen["env"]["PYTHONUNBUFFERED"] == "1"  # logs stream live
     assert cmd[cmd.index("--epochs") + 1] == "7"
     budget = float(cmd[cmd.index("--time_limit_hours") + 1])
     assert abs(budget - (kr.SESSION_HOURS - kr.SAVE_MARGIN_HOURS - 1.0)) < 0.01
@@ -119,3 +121,45 @@ def test_find_checkpoint_prefers_full_state(kaggle):
     (b / "latest_state.pth").write_bytes(b"s")
     assert kr.find_checkpoint("t") == b
     assert kr.find_checkpoint("other-task") is None
+
+
+
+# ------------------------------------------------------- multi-GPU decisions
+def test_choose_gpus_falls_back_step_by_step(monkeypatch):
+    """Self-test as-is -> with NCCL_P2P_DISABLE=1 -> one GPU."""
+    monkeypatch.setattr(kr, "_gpu_count", lambda: 2)
+    for results, want_gpus, want_p2p in (([True], 2, None), ([False, True], 2, "1"), ([False, False], 1, None)):
+        calls = []
+        monkeypatch.setattr(kr, "_selftest", lambda env, r=iter(results): calls.append(env) or next(r))
+        n, env = kr.choose_gpus(0, {"X": "1"})
+        assert (n, env.get("NCCL_P2P_DISABLE")) == (want_gpus, want_p2p)
+        assert len(calls) == len(results)
+    monkeypatch.setattr(kr, "_gpu_count", lambda: 1)
+    monkeypatch.setattr(kr, "_selftest", lambda env: pytest.fail("no self-test with one GPU"))
+    assert kr.choose_gpus(0, {})[0] == 1
+
+
+def test_selftest_that_hangs_counts_as_failure(monkeypatch):
+    def hang(*a, **k):
+        raise kr.subprocess.TimeoutExpired(cmd="selftest", timeout=k.get("timeout"))
+    monkeypatch.setattr(kr.subprocess, "run", hang)
+    assert kr._selftest({}, timeout=1) is False
+
+
+def test_failed_multi_gpu_run_is_retried_on_one_gpu(kaggle, monkeypatch):
+    kr.prepare("all", budget_gb=5)
+    data = kaggle / "working" / kr.DATA_DIR
+    monkeypatch.setattr(kr, "choose_gpus", lambda gpus, env: (2, env))
+    cmds = []
+    monkeypatch.setattr(kr.subprocess, "call", lambda cmd, cwd, env: cmds.append(cmd) or (1 if len(cmds) == 1 else 0))
+    assert kr.train("t", data, epochs=3) == 0
+    assert [c[c.index("--gpus") + 1] for c in cmds] == ["2", "1"]
+
+
+def test_multigpu_selftest_tool_runs_on_cpu_processes():
+    """The real tool, two processes over gloo (NCCL needs GPUs)."""
+    pytest.importorskip("torch")
+    import subprocess
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "multigpu_selftest.py"), "--cpu", "2"],
+                       capture_output=True, text=True, timeout=180)
+    assert r.returncode == 0 and "SELFTEST OK" in r.stdout, r.stdout + r.stderr

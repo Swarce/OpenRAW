@@ -33,8 +33,9 @@ week** (TPU quota is separate, but InvISP isn't ported to TPUs), **20 GB** of sa
 - **Add Input** → your new dataset.
 - Settings → Accelerator **GPU T4 x2** (or P100 if your account offers it).
   Training uses **every GPU the session has** -- both T4s, roughly 1.7-1.9x
-  faster than one. To use a single GPU instead, call `kr.run(..., gpus=1)` in
-  the last cell.
+  faster than one -- after first checking that the GPUs can communicate (see
+  troubleshooting). To force a single GPU, call `kr.run(..., gpus=1)` in the
+  last cell.
 - **Save & Run All (Commit)**. It trains until ~11¼ h into the session, stops
   cleanly *between* epochs, and saves checkpoints, `eval.csv` and `best.pth`.
 - To continue: **Add Input → this notebook's own latest output** (if it's
@@ -84,3 +85,27 @@ machine (`tests/test_kaggle_runner.py`). An unmocked rehearsal ran all three
 stages with the real 8-block network: prepare → train until the time budget →
 resume from the attached previous output to completion. Not tested: Kaggle's
 own UI steps and an actual Kaggle GPU session.
+
+## Troubleshooting
+
+**No log output for a long time, GPUs idle.** On some machines, communication
+between the two GPUs hangs instead of failing — the first two-GPU session did
+exactly this, silently, for hours. The runner now tests GPU-to-GPU
+communication before training (`tools/multigpu_selftest.py`, killed after 4
+minutes if it hangs), retries with `NCCL_P2P_DISABLE=1` (the usual fix when
+GPUs can't talk directly over PCIe), and otherwise trains on one GPU. During
+training, a stalled GPU exchange errors out after 15 minutes, and a failed
+multi-GPU run is retried on one GPU from the last saved epoch. Output is
+unbuffered, so the log shows progress as it happens. Check the GPU usage
+graphs in the session panel: idle GPUs with no new log lines mean it's stuck.
+
+**`ERRORED_MOUNTING_DATASET` at session start.** Kaggle couldn't attach an
+input — usually the notebook's own output from a version that saved nothing
+(a run that was stopped or failed). Remove that input and re-add it, picking
+the last version that finished normally (its `STATUS.txt` shows progress). If
+it already is that version, it's a Kaggle-side problem: retry.
+
+**`No usable CUDA GPU`.** Check the accelerator setting. Don't install `torch`
+through a dependency setting: Kaggle's preinstalled build matches its GPU
+drivers, and a different build may not.
+
