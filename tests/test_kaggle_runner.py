@@ -163,3 +163,15 @@ def test_multigpu_selftest_tool_runs_on_cpu_processes():
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "multigpu_selftest.py"), "--cpu", "2"],
                        capture_output=True, text=True, timeout=180)
     assert r.returncode == 0 and "SELFTEST OK" in r.stdout, r.stdout + r.stderr
+
+
+def test_compare_only_scores_models_without_training(kaggle, monkeypatch):
+    pytest.importorskip("torch")
+    kr.run(cameras="all", budget_gb=5)
+    _publish_as_dataset(kaggle)
+    called = []
+    monkeypatch.setattr(kr, "train", lambda *a, **k: called.append(1) or 0)
+    assert kr.run(compare_only=True) == "compared"
+    assert not called
+    md = (kaggle / "working" / "compare" / "compare.md").read_text()
+    assert "nikon.pth" in md and "canon.pth" in md and "openraw-fivek-e35-best.pth" in md

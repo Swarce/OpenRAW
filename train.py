@@ -20,6 +20,48 @@ from config.config import get_arguments
 from openraw.third_party.invisp.utils.JPEG import DiffJPEG
 
 
+def _fivek_prepare():
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
+    import fivek_prepare
+    return fivek_prepare
+
+
+def resolve_cameras(args):
+    """PATCHED (OpenRAW): the camera folders to train on, preparing FiveK ones
+    as needed (--download etc.). Also used by tools/compare_models.py, so it
+    evaluates on exactly the cameras -- and so the test images -- training does."""
+    _fp = _fivek_prepare()
+    _queries = [q.strip() for c in (args.camera or []) for q in c.split(",") if q.strip()]
+    # folders prepared from other datasets (data/raise_prepare.py: RAISE_*) are used as they are
+    _other = [q for q in _queries if q.startswith(_fp.OTHER_SOURCE_PREFIXES)]
+    _queries = [q for q in _queries if q not in _other]
+    if args.all_downloaded:
+        _found = _fp.downloaded_cameras(args.data_path)
+        _other += [c for c in _fp.prepared_other_sources(args.data_path) if c not in _other]
+        if not _found and not _other:
+            raise SystemExit(f"[data] --all-downloaded: no camera folders with DNGs under {args.data_path}fivek/raw/ "
+                             f"and no prepared RAISE_* folders in {args.data_path}")
+        print(f"[data] found {len(_found) + len(_other)} camera(s): " + ", ".join(_found + _other))
+        _queries += [c for c in _found if c not in _queries]
+    for _c in _other:
+        if not (os.path.isfile(os.path.join(args.data_path, f"{_c}_train.txt"))
+                and os.path.isdir(os.path.join(args.data_path, _c, "RAW"))):
+            raise SystemExit(f"[data] {_c}: not prepared in {args.data_path} (run data/raise_prepare.py first)")
+    if not _queries and not _other:
+        _queries = ["NIKON_D700"]  # upstream's default camera
+    return (_fp.prepare_cameras(_queries, args.data_path, download=args.download, jobs=args.download_jobs,
+                                use_available=args.all_downloaded, delete_dngs=args.delete_dngs)
+            if _queries else []) + _other
+
+
+def eval_indices(n_test, n_images):
+    """Which test images evaluation uses: n_images spread evenly over the test
+    list (which runs camera by camera). Shared with tools/compare_models.py."""
+    k = max(1, n_test // max(1, n_images))
+    return list(range(0, n_test, k))[:n_images]
+
+
 # PATCHED (OpenRAW, not upstream): all setup below runs only when this file is
 # executed, not when it's imported. Upstream ran it at import time, which breaks
 # multiprocessing's "spawn" start method (the default on Windows and macOS, and
@@ -73,33 +115,10 @@ if __name__ == "__main__":
     # it also works on machines without one (--prepare-only). Resolves FiveK camera
     # names, downloads only that camera's missing DNGs (--download), preprocesses
     # them (data/fivek_prepare.py) and writes the train/test lists the loader reads.
-    import sys as _sys
-    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
-    import fivek_prepare as _fp
     if args.list_cameras:
-        _fp.list_cameras(args.data_path)
+        _fivek_prepare().list_cameras(args.data_path)
         raise SystemExit(0)
-    _queries = [q.strip() for c in (args.camera or []) for q in c.split(",") if q.strip()]
-    # folders prepared from other datasets (data/raise_prepare.py: RAISE_*) are used as they are
-    _other = [q for q in _queries if q.startswith(_fp.OTHER_SOURCE_PREFIXES)]
-    _queries = [q for q in _queries if q not in _other]
-    if args.all_downloaded:
-        _found = _fp.downloaded_cameras(args.data_path)
-        _other += [c for c in _fp.prepared_other_sources(args.data_path) if c not in _other]
-        if not _found and not _other:
-            raise SystemExit(f"[data] --all-downloaded: no camera folders with DNGs under {args.data_path}fivek/raw/ "
-                             f"and no prepared RAISE_* folders in {args.data_path}")
-        print(f"[data] found {len(_found) + len(_other)} camera(s): " + ", ".join(_found + _other))
-        _queries += [c for c in _found if c not in _queries]
-    for _c in _other:
-        if not (os.path.isfile(os.path.join(args.data_path, f"{_c}_train.txt"))
-                and os.path.isdir(os.path.join(args.data_path, _c, "RAW"))):
-            raise SystemExit(f"[data] {_c}: not prepared in {args.data_path} (run data/raise_prepare.py first)")
-    if not _queries and not _other:
-        _queries = ["NIKON_D700"]  # upstream's default camera
-    args.camera = (_fp.prepare_cameras(_queries, args.data_path, download=args.download, jobs=args.download_jobs,
-                                       use_available=args.all_downloaded, delete_dngs=args.delete_dngs)
-                   if _queries else []) + _other
+    args.camera = resolve_cameras(args)
     if args.prepare_only:
         print("[data] prepared:", ", ".join(args.camera))
         raise SystemExit(0)
@@ -416,8 +435,7 @@ def main(args, rank=0, world=1):
             test_set = None
         if test_set is not None and len(test_set):
             test_set.eval_crop = args.eval_crop
-            k = max(1, len(test_set) // max(1, args.eval_images))
-            idx = list(range(0, len(test_set), k))[:args.eval_images]  # spread across cameras
+            idx = eval_indices(len(test_set), args.eval_images)  # spread across cameras
             eval_loader = DataLoader(torch.utils.data.Subset(test_set, idx), batch_size=1, shuffle=False,
                                      num_workers=min(2, args.workers))
             eval_every = args.eval_every or max(1, args.epochs // 10)

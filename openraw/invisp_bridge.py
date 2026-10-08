@@ -103,7 +103,9 @@ def _load_net(camera: str, pretrained_dir: str, device, checkpoint: str | None =
     except TypeError:  # torch < 1.13
         state_dict = torch.load(ckpt_path, map_location=device)
     if isinstance(state_dict, dict) and "net" in state_dict and "optimizer" in state_dict:
-        state_dict = state_dict["net"]  # train.py's full-state latest_state.pth
+        # train.py's full-state latest_state.pth: the weight average if it has
+        # one (what latest.pth holds too), else the live weights
+        state_dict = state_dict.get("ema") or state_dict["net"]
     # strict=False only to tolerate upstream's checkpoints, which carry 16
     # leftover 'actnorm' entries from a layer the released model doesn't use.
     # Anything MISSING is an error: strict=False alone loaded nothing at all

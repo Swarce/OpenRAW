@@ -73,6 +73,14 @@ summarized; commit messages carry the full detail and measurements.
 - Gradient checkpointing (`--checkpointing auto`, on below 12 GB): fits the
   8-block network on 6 GB GPUs, identical gradients.
 - `--time_limit_hours`: stop cleanly between epochs before a session limit.
+- **`tools/compare_models.py`**: scores any set of checkpoints on exactly
+  the held-out images, crops and metric of training's evaluation, with a
+  per-camera breakdown, into `compare.md` / `compare.csv`. The Kaggle
+  notebook runs it after every training session, or alone with
+  `COMPARE_ONLY = True`. `train.py`'s camera resolution and test-image
+  selection are shared functions now, so the two can't drift apart.
+- `--invisp-checkpoint` on a full-state `latest_state.pth` uses its weight
+  average when it has one.
 - **Weight averaging (`--ema`, default 0.999)**: evaluation and the saved
   `best.pth` / `latest.pth` / `NNNN.pth` use an exponential moving average of
   the weights, which doesn't jitter between snapshots the way the live

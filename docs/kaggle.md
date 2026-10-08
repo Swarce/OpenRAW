@@ -48,6 +48,19 @@ week** (TPU quota is separate, but InvISP isn't ported to TPUs), **20 GB** of sa
 `EPOCHS = None` picks the epoch count that matches upstream InvISP's
 training amount (~195k steps) for however many images fit the budget.
 
+## Comparing models
+
+Every training session ends by scoring all the models — upstream's
+`canon.pth`/`nikon.pth`, the `openraw-fivek-*.pth` files shipped in the repo,
+and this run's `best.pth`/`latest.pth` — on the held-out test images, with
+`tools/compare_models.py`. The result is `compare/compare.md` in the output:
+the same raw PSNR as the `[EVAL]` lines, plus a per-camera breakdown.
+
+To compare without training (e.g. while a training session runs): in a copy
+of the notebook, attach the prepared dataset (and the training notebook's
+latest output, to include its `best.pth`), set `COMPARE_ONLY = True` and
+Accelerator **None**. On CPU it takes roughly 5-10 minutes per model.
+
 ## More data: RAISE (optional)
 
 RAISE (8,156 Nikon raws; **non-commercial research use only**, see

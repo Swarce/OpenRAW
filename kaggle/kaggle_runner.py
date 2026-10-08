@@ -327,6 +327,29 @@ def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hour
     return code
 
 
+def compare(task: str, data_root: Path, out: Path = None, extra: list | None = None) -> int:
+    """Score the repo's pretrained/*.pth, this task's best.pth / latest.pth and
+    any attached checkpoints on the held-out test images (tools/compare_models.py)
+    -> compare/compare.md in the output. Returns its exit code; never raises."""
+    out = Path(out or WORKING / "compare")
+    ckpts = sorted(str(p) for p in (REPO / "pretrained").glob("*.pth"))
+    # this task's checkpoints: from this session's training, else the attached previous output
+    own = WORKING / "exps" / task / "checkpoint"
+    if not own.is_dir():
+        own = find_checkpoint(task, INPUT)
+    if own:
+        ckpts += [str(Path(own) / n) for n in ("best.pth", "latest.pth") if (Path(own) / n).exists()]
+    ckpts += [str(c) for c in (extra or [])]
+    cmd = [sys.executable, str(REPO / "tools" / "compare_models.py"), "--data_path", str(data_root) + "/",
+           "--out", str(out)] + ckpts
+    log(f"comparing {len(ckpts)} checkpoint(s) on the held-out test images ...")
+    try:
+        return subprocess.call(cmd, cwd=str(REPO), env=dict(os.environ, PYTHONUNBUFFERED="1"))
+    except Exception as e:  # noqa: BLE001
+        log(f"comparison failed: {e}")
+        return 1
+
+
 def write_status(task: str, epochs: int) -> str:
     """Leave a one-line STATUS.txt in the output saying whether to run again."""
     import torch
@@ -345,9 +368,11 @@ def write_status(task: str, epochs: int) -> str:
 
 # ---------------------------------------------------------------------- main
 def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, session_start=None,
-        extra_train_args=None, gpus=0, raise_csv=None, raise_cameras=(), raise_start=0):
+        extra_train_args=None, gpus=0, raise_csv=None, raise_cameras=(), raise_start=0, compare_only=False):
     """raise_csv: prepare RAISE instead of FiveK or training -- a path, or True
-    to use the CSV with a NEF column among the attached inputs."""
+    to use the CSV with a NEF column among the attached inputs.
+    compare_only: don't train; score the checkpoints on the held-out test
+    images (needs the prepared data attached; works on CPU)."""
     session_start = session_start or time.time()
     if raise_csv:
         csv_path = find_raise_csv(INPUT) if raise_csv is True else Path(raise_csv)
@@ -371,6 +396,9 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     shutil.rmtree(data_root, ignore_errors=True)
     cams = merge_data(roots, data_root)
     log(f"cameras: {', '.join(cams)}")
+    if compare_only:
+        code = compare(task, data_root)
+        return "compared" if code == 0 else f"comparison exited with code {code}"
     ck = find_checkpoint(task, INPUT)
     if ck:
         restore_checkpoint(ck, WORKING / "exps", task)
@@ -380,4 +408,5 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     code = train(task, data_root, epochs=epochs, workers=workers, session_start=session_start,
                  extra_args=extra_train_args, gpus=gpus)
     write_status(task, epochs)
+    compare(task, data_root)  # a minute or two on a GPU; leaves compare/compare.md in the output
     return "trained" if code == 0 else f"train.py exited with code {code}"

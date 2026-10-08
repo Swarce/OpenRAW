@@ -53,10 +53,28 @@ What the differences mean in practice:
 - **Comparability.** "Held-out raw PSNR" is OpenRAW's own evaluation (real
   FiveK JPEG → inverse network → compared with the true raw, on 512 px centre
   crops of the test split). The upstream models haven't been scored on it
-  yet, so the table can't rank OpenRAW's models against them. Upstream's paper
-  numbers use a different setup and aren't comparable either.
+  yet, so the table can't rank OpenRAW's models against them yet;
+  `tools/compare_models.py` (below) does exactly that, and the Kaggle notebook
+  runs it at the end of every session. Upstream's paper numbers use a
+  different setup and aren't comparable either.
 - Training continues; these files will be replaced by later snapshots, then a
   final model.
+
+### Comparing models yourself
+
+```bash
+python tools/compare_models.py --data_path data/                    # every pretrained/*.pth
+python tools/compare_models.py --data_path data/ pretrained/*.pth exps/<task>/checkpoint/best.pth
+```
+
+It scores each checkpoint on the same held-out images, crops and metric as
+training's `[EVAL]` lines (so the numbers match `eval.csv`), with a
+per-camera breakdown, and writes `compare/compare.md` + `compare.csv`. One
+caveat for upstream's models: OpenRAW's prepared data subtracts each
+sensor's black level and normalizes by each image's own white level, which
+upstream's training data didn't (see `data/README.md`), so their raw PSNR
+here includes that convention mismatch — the same one they face inside
+OpenRAW. ~1 minute per model on a GPU, several on a CPU.
 
 ### On a real photo
 
