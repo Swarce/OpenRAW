@@ -23,19 +23,22 @@ readers are strict about different things.
 git clone https://github.com/Swarce/OpenRAW.git
 cd OpenRAW
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"        # add ,invisp for the PyTorch path
+pip install -e ".[dev]"        # add ,training for the PyTorch/InvISP tests
 python -m pytest
 ```
 
-Tests needing optional pieces skip cleanly when those are missing: PyTorch
-(InvISP tests), `rawpy` (real-libraw decode tests), and Adobe's
-`dng_validate` (see below).
+Tests needing optional pieces skip cleanly when those are missing: PyTorch +
+torchvision (InvISP, training-loop and multi-process tests), `rawpy` (real
+libraw decode tests), and Adobe's `dng_validate` (see below). Training tests
+use a small network on the CPU, so no GPU is needed; multi-GPU tests run two
+CPU processes over gloo. The training-loop tests take a few minutes.
 
 ## The one rule for DNG changes
 
 **A change to how DNGs are written isn't verified until it passes the
-strictest reader.** Every real DNG bug in this project's history passed a
-lenient reader first — tifffile reads back whatever it wrote, and libraw
+strictest reader** — for both layouts, linear and CFA. Every real DNG bug
+in this project's history passed a lenient reader first — tifffile reads
+back whatever it wrote, and libraw
 scans all IFDs, so neither catches what Adobe-SDK-based apps (Lightroom,
 Luminar, Android) reject. Build Adobe's validator once:
 
@@ -63,7 +66,9 @@ behind it, and the dead ends already explored.
   `openraw/third_party/` get a `PATCHED (OpenRAW, not upstream)`
   comment and a note in [NOTICE.md](NOTICE.md). Fix what's broken; leave
   the rest as upstream wrote it.
-- **Privacy by default.** GPS is never copied.
+- **Privacy by default.** GPS is never copied, nor the source file's folder path.
+- **Fail loudly.** A wrong input, missing dependency or mismatched
+  checkpoint is a clear error, never a silent fallback to garbage.
 
 ## Pull requests
 

@@ -53,35 +53,30 @@ Canon's black-level subtraction dead code) that was deliberately left
 unpatched rather than silently "corrected" — see that file for why.
 
 **Also vendored (added for actual training): `train.py`, `dataset/`
-(`FiveK_dataset.py`, `base_dataset.py`), `config/config.py`.** See
-[`docs/training.md`](docs/training.md) for the full workflow and three real fixes
-applied to get this running at all (not cosmetic): `train.py`'s import
-paths patched to match this repo's layout (`model`/`utils` live under
-`openraw/third_party/invisp/` here, not top-level as in upstream); `train.py`'s
-hard `nvidia-smi` shell-out replaced with an explicit CUDA check plus a
-non-fatal fallback instead of a confusing crash on any machine where
-`nvidia-smi` isn't on PATH in exactly the form upstream assumed; and
-`dataset/FiveK_dataset.py`'s `from scipy.misc import imread` (removed
-from scipy years ago, fails outright on any current scipy) replaced with
-an equivalent PIL-based read. Two genuinely dead imports in
+(`FiveK_dataset.py`, `base_dataset.py`), `config/config.py`.** These started
+as upstream's files with only what was broken patched (import paths for this
+repo's layout; `scipy.misc.imread`, removed from scipy years ago; an
+`nvidia-smi | grep` GPU picker that fails on Windows) and have since been
+substantially extended for OpenRAW: any FiveK camera and multi-camera
+pooling, per-file black/white levels and CFA patterns, compact mosaic
+storage, parallel loading, exact resume, held-out evaluation, gradient
+checkpointing, time-limited sessions and multi-GPU training. Every change is
+marked inline with `PATCHED (OpenRAW, not upstream)`; the reasons are in
+[`docs/training.md`](docs/training.md). Two dead imports in
 `FiveK_dataset.py` (`torchvision`, `rawpy` — imported, never referenced)
-were deliberately left untouched rather than "cleaned up", consistent
-with this project's pattern of patching only what's actually broken.
+were deliberately left in place. `data/fivek_download.py`,
+`data/fivek_prepare.py`, `dataset/mosaic_store.py` and `kaggle/` are
+OpenRAW's own code, not vendored.
 
-**What was NOT vendored:** `dataset/` (the PyTorch `Dataset` class
-itself — OpenRAW doesn't yet have its own training loop to feed it
-into), `config/`, `train.py`, `test_rgb.py`, `test_raw.py`,
-`cal_metrics.py` — upstream's FiveK-dataset-specific training/eval
-scripts, which pull in extra dependencies (`torchvision`, a now-removed
-`scipy.misc.imread`) beyond what this project otherwise needs.
-`openraw/invisp_bridge.py` is **our own new code**, not vendored, that
-replaces their role for single-image inference — it reuses
-`openraw/decode.py` instead of their dataset loader, and was written
-by reading their `test_rgb.py` and `test_raw.py` in full to match their
-preprocessing (normalization, white-balance handling, the `--gamma`
-training flag's effect on what the "RAW" side of the network actually
-represents) rather than guessing at it. See that file's docstring for
-specifics.
+**What was NOT vendored:** `test_rgb.py`, `test_raw.py` and
+`cal_metrics.py` — upstream's evaluation scripts. `openraw/invisp_bridge.py`
+is **our own new code** that replaces their role for single-image
+inference — it reuses `openraw/decode.py` instead of their dataset loader,
+and was written by reading their `test_rgb.py` and `test_raw.py` in full to
+match their preprocessing (normalization, white-balance handling, the
+`--gamma` training flag's effect on what the "RAW" side of the network
+actually represents) rather than guessing at it. See that file's docstring
+for specifics.
 
 **Pretrained weights:** `pretrained/canon.pth` and `pretrained/nikon.pth`
 are upstream's own official checkpoints (verified byte-identical via

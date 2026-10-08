@@ -5,10 +5,11 @@
 2021) — an invertible neural network trained to map between RAW and
 rendered sRGB. Full attribution in [NOTICE.md](../NOTICE.md).
 
-> **Status: experimental.** It runs end to end and is covered by tests,
-> but it has only two camera models and hasn't been evaluated against real
-> RAW ground truth on real camera photos. The classical path is the default
-> for good reason.
+> **Status: experimental.** It runs end to end and is covered by tests.
+> Upstream ships two camera-specific models; you can train your own on any
+> FiveK cameras ([training.md](training.md)). Models are scored on FiveK's
+> held-out RAW files during training, but not yet against RAW+JPEG pairs from
+> other cameras. The classical path is the default for good reason.
 
 ## Running it
 
@@ -21,11 +22,24 @@ Weights load from `pretrained/` relative to the current directory
 (`--invisp-pretrained-dir` to change it). They are not part of the
 installed package — see licensing below.
 
+To use a model you trained ([training.md](training.md), [kaggle.md](kaggle.md)):
+
+```bash
+openraw photo.jpg --invisp-checkpoint path/to/best.pth
+```
+
+Weights-only files and `train.py`'s full-state `latest_state.pth` both load.
+A checkpoint missing any weight is an error: upstream loaded with
+`strict=False`, which silently ignored mismatches — loading a full-state file
+that way set 0 of 280 weights and ran a random network.
+
 Expect colors to differ from the classical path: InvISP reconstructs its
 learned approximation of the chosen camera's sensor-native response, not
-an sRGB-preserving transform. Each checkpoint is camera-specific (upstream
+an sRGB-preserving transform. Each upstream checkpoint is camera-specific (upstream
 says so explicitly); a JPEG from any other camera is still reconstructed
-through that camera's learned behavior.
+through that camera's learned behavior. A model trained on several pooled
+cameras learns an average behavior instead, which is arguably the better
+fit when a JPEG's source camera is unknown.
 
 ## What's in the repo
 
@@ -54,6 +68,9 @@ through that camera's learned behavior.
 - **Licensing of weights.** The checkpoints come from an MIT repository but
   were trained on MIT-Adobe FiveK, which has its own usage terms. Check
   those before redistributing weights publicly (including any you train).
-- **Evaluation.** Needs a harness comparing reconstructions against real
-  RAW files (FiveK's test split) before claims about quality can be made.
-- **More cameras.** See [training.md](training.md).
+- **Evaluation.** Training now scores models on FiveK's held-out RAW files
+  (raw PSNR, see [training.md](training.md)). Still missing: the same score
+  for upstream's checkpoints as a baseline, and RAW+JPEG pairs from other,
+  modern cameras.
+- **Batch size.** Multi-GPU training uses an effective batch size above
+  upstream's 1; the held-out score is how to check that it doesn't hurt.

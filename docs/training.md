@@ -2,8 +2,9 @@
 
 The full workflow, start to finish. The upstream scripts were patched only
 where they were actually broken (listed below), not rewritten for style.
-The data pipeline and a real training step (on CPU) are covered by tests;
-full GPU training runs are not yet verified — see the bottom of this page.
+The data pipeline, the training loop and multi-process training are covered
+by tests, and a real pooled-camera run has trained on Kaggle GPUs — see the
+bottom of this page for exactly what's verified.
 
 ## Quick start
 
@@ -18,7 +19,7 @@ full GPU training runs are not yet verified — see the bottom of this page.
 > `train.py` diagnoses this if it can't use your GPU.
 
 ```bash
-pip install -e ".[training]"            # torch, rawpy, colour-demosaicing
+pip install -e ".[training]"            # torch, torchvision, rawpy, colour-demosaicing
 python train.py --list-cameras           # every FiveK camera + image count
 python train.py --task d70 --camera "Nikon D70" --download --gamma --aug
 ```
@@ -141,11 +142,16 @@ plus the last epoch) the model is scored on held-out test images
   This is what OpenRAW actually does, and it picks `best.pth`.
 - **rgb PSNR** -- raw through the forward network vs the JPEG.
 
-Results go to the log (`[EVAL]` lines) and `exps/<task>/eval.csv`; `best.pth`
-(weights-only, usable with `openraw --invisp`) always holds the best model so
-far, and survives `--resume`. Use the curve to decide when to stop: once raw
-PSNR flattens, more epochs are mostly polishing. Per-step training loss is
-too noisy at batch size 1 to judge this.
+Results go to the log (`[EVAL]` lines) and `exps/<task>/eval.csv` (which
+keeps every evaluation, even when a log viewer trims old lines); `best.pth`
+always holds the best model so far, and survives `--resume`. Use the curve to
+decide when to stop: once raw PSNR flattens, more epochs are mostly polishing.
+
+Don't judge progress from the per-step losses. They're too noisy at batch
+size 1, and `raw_loss` in particular is optimistic: in training, the inverse
+network only ever receives the network's *own* output (through a simulated
+JPEG), so it typically sits well under 0.01 while a real camera JPEG
+reconstructs noticeably worse. The evaluation's raw PSNR feeds in real JPEGs.
 
 **Speed.** Images are loaded by parallel worker processes (`--workers`,
 default: up to 8, one less than your CPU cores). Preparing one 18 MP sample
@@ -167,8 +173,7 @@ each backward pass, which DDP's gradient hooks aren't built around. Note the
 effective batch size differs from upstream's 1 -- the held-out evaluation is
 how to check it doesn't hurt.
 
-**Resuming.** Every epoch saves `latest.pth` (weights only, usable with
-`openraw --invisp`) and `latest_state.pth` (weights + optimizer +
+**Resuming.** Every epoch saves `latest.pth` (weights only) and `latest_state.pth` (weights + optimizer +
 learning-rate schedule + epoch/step). `--resume` continues exactly where it
 stopped. Checkpoints are written atomically, so a crash mid-save can't
 corrupt them. `NNNN.pth` snapshots are kept every 10 epochs.
@@ -191,6 +196,17 @@ after the first step and warns if it's nearly full. To make any future
 overflow fail loudly instead of crawling: NVIDIA Control Panel > Manage 3D
 settings > CUDA - Sysmem Fallback Policy > Prefer No Sysmem Fallback.
 
+## Using your trained model
+
+```bash
+openraw photo.jpg --invisp-checkpoint exps/<task>/checkpoint/best.pth
+```
+
+Any checkpoint `train.py` writes works (`best.pth`, `latest.pth`, `NNNN.pth`,
+or the full-state `latest_state.pth`). A file that doesn't fit the network is
+an error rather than a silent no-op -- upstream's loader skipped mismatched
+weights without complaint, which left a randomly initialised network.
+
 ## Real fixes applied to get here (not cosmetic — these were blockers)
 
 Same pattern as everywhere else in this project: patch only what's
@@ -206,16 +222,12 @@ necessary to run, document inline, never silently.
   `openraw/third_party/invisp/` instead. Patched the two import lines
   accordingly; `dataset/` and `config/` ARE top-level here (matching
   upstream), so those imports are untouched.
-- **GPU auto-select** (`train.py`): upstream shells out to `nvidia-smi`
-  and parses its output to pick the GPU with the most free memory --
-  reasonable on a known multi-GPU box, but it crashes confusingly
-  (`FileNotFoundError`, or an empty-list `np.argmax`) anywhere
-  `nvidia-smi` isn't on PATH in exactly the expected form. Now: an
-  explicit, clear `RuntimeError` up front if `torch.cuda.is_available()`
-  is False (this script trains GPU-only, full stop), and the nvidia-smi
-  auto-select itself is wrapped so a failure there falls back to
-  whatever `CUDA_VISIBLE_DEVICES`/default device is already set, with a
-  warning instead of a crash.
+- **GPU auto-select** (`train.py`): upstream piped `nvidia-smi` through
+  `grep` and `rm` (absent on Windows, so it failed every run there) and set
+  `CUDA_VISIBLE_DEVICES` too late to take effect. Now it asks `nvidia-smi`
+  for free memory directly and picks the GPU by index (single-GPU runs on
+  multi-GPU machines only). If CUDA isn't usable at all, the error says
+  why: CPU-only PyTorch build, no driver, or a driver too old.
 - **Two genuinely dead imports** (`torchvision`, `rawpy` in
   `dataset/FiveK_dataset.py`) left completely untouched in the vendored
   file (neither is actually referenced anywhere in it) — just documented
@@ -224,14 +236,22 @@ necessary to run, document inline, never silently.
 
 ## What's verified vs not, stated plainly
 
-Verified by the test suite (offline, with synthetic Bayer DNGs served from a
-local HTTP server behind fake FiveK metadata):
+Verified by the test suite (offline: synthetic Bayer DNGs served from a local
+HTTP server behind fake FiveK metadata):
 - camera selection → download of only the missing files → preprocessing →
   split lists, including resume/skip behaviour and deleted-DNG handling;
 - CFA pattern detection for all four Bayer layouts, black/white levels;
 - the loader pooling several cameras and normalizing per image;
-- one real InvISP forward + backward + optimizer step on CPU.
+- `train.py`'s real training loop (small network, CPU): workers, exact
+  resume, time-limit stops, evaluation, `best.pth` across resumes;
+- gradient checkpointing gives identical gradients for every parameter;
+- multi-process training: averaged gradients equal single-process batch
+  training, processes stop together, checkpoints resume across process counts.
 
-Not yet verified: a full multi-epoch GPU training run, loss curves, and
-checkpoint quality — those need a GPU and the real dataset. Start any real
-run with `--debug_mode` first.
+Verified in a real run: pooled FiveK cameras (~1,070 training images, the
+amount that fits Kaggle's 18 GB budget) on a Kaggle T4 at ~0.8 s per step,
+resuming across sessions; held-out raw PSNR reached 39.1 dB by epoch 35.
+
+Not yet verified: multi-GPU training on real GPUs (NCCL), a completed run's
+final quality, and comparison against upstream's `canon.pth`/`nikon.pth` on
+the same evaluation. Start any new setup with `--debug_mode` first.

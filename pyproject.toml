@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openraw"
 dynamic = ["version"]
-description = "Reconstruct pseudo-RAW linear DNGs from JPEGs for extra grading headroom (part of the OpenRAW project)"
+description = "Turn JPEGs into editable raw DNGs (linear or Bayer mosaic) for extra grading headroom"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE", "NOTICE.md", "openraw/third_party/invisp/LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "Riley", email = "riley026465@gmail.com" }]
-keywords = ["dng", "raw", "jpeg", "photography", "linear-dng", "invisp"]
+keywords = ["dng", "raw", "jpeg", "photography", "linear-dng", "bayer", "demosaicing", "invisp"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

@@ -11,30 +11,38 @@ summarized; commit messages carry the full detail and measurements.
   `PSEUDORAW_DNG_VALIDATE` → `OPENRAW_DNG_VALIDATE`. DNGs now identify as
   `OpenRAW` (Make/Software) and `OpenRAW virtual sensor` (UniqueCameraModel).
 
-### Added
-- Training: `--gpus N` multi-GPU data parallelism (one process per GPU,
-  hand-averaged gradients, disjoint sampling, rank 0 evaluates/saves/stops).
-  Exactly equivalent to batch size N. Kaggle runner uses all GPUs by default.
-- **Kaggle training** (`kaggle/openraw_kaggle.ipynb` + `kaggle/kaggle_runner.py`):
-  one notebook that prepares a FiveK dataset within Kaggle's 20 GB, then trains
-  across 12 h GPU sessions, stopping cleanly and resuming automatically.
-- `train.py --time_limit_hours`: stop between epochs before a session limit.
+### Added — conversion
+- **Batch conversion**: files and folders, `-r` recursive with mirrored
+  output tree, `--jobs` for parallel files. Re-runs skip finished outputs
+  (`--overwrite` to redo), a failing file never stops the batch, and
+  interrupted runs never leave truncated DNGs.
+- Camera EXIF passthrough (make, model, lens, exposure, ISO, focal length,
+  orientation, capture time). Never fabricated when absent; GPS never copied.
+- `openraw --version` reports key library versions for bug reports.
+
+### Added — DNG output
+- **Lossless-JPEG DNG compression** (tiled, 3-component) with a DNG
+  LinearizationTable at 12-bit by default: ~50 MB instead of ~108 MB for an
+  18 MP photo. `--bit-depth 16/14/12/10`, `--compression none`.
+- **`--layout cfa`**: Bayer (RGGB) mosaic DNGs, demosaiced by the raw editor
+  like a camera raw; ~18 MB vs ~50 MB for 18 MP. Round trip ~48 dB PSNR
+  through libraw's AHD/DCB/PPG on a full-resolution photo (median 42 dB on 14
+  downscaled web photos; quality tracks pixel-level detail). 4 px padding +
+  DefaultCrop; 2-component lossless-JPEG tiles. Passes Adobe `dng_validate`
+  in every mode. Best for photographs; keep linear for graphics.
 - `tools/cfa_quality.py`: measure `--layout cfa` round-trip quality on your
   own photos across every libraw demosaic (+ Adobe's reference renderer),
   with zoomed side-by-side crops.
-- Training: held-out evaluation (`--eval_every`, `--eval_images`,
-  `--eval_crop`): raw PSNR (JPEG -> raw, the OpenRAW direction) and rgb PSNR
-  on test-split centre crops, logged and written to `eval.csv`; `best.pth`
-  keeps the best model by raw PSNR across resumes.
-- **`--layout cfa`**: Bayer (RGGB) mosaic DNGs, demosaiced by the raw editor
-  like a camera raw; ~18 MB vs ~50 MB for 18 MP. Round trip ~48 dB PSNR
-  through libraw's AHD/DCB/PPG. 4 px padding + DefaultCrop; 2-component
-  lossless-JPEG tiles. Passes Adobe `dng_validate` in every mode.
-- Training: parallel data loading (`--workers`, default up to 8; upstream
-  loaded on the main thread, leaving the GPU mostly idle), exact resume from
-  full-state checkpoints (`latest_state.pth`: optimizer, LR schedule,
-  epoch/step) with atomic saves, `--start_epoch` for weights-only
-  checkpoints, data/compute timing and per-epoch ETA, `--epochs`, `--device`.
+- Multithreaded tile encoding (`--threads`), byte-identical at any count.
+- Embedded JPEG preview in the standard preview + SubIFD layout.
+
+### Added — learned reconstruction (InvISP)
+- Optional InvISP (CVPR 2021) learned path, `--invisp`, with vendored
+  upstream code and official checkpoints.
+- **`--invisp-checkpoint PATH`**: use a model you trained (`best.pth`,
+  `latest.pth`, or the full-state `latest_state.pth`).
+
+### Added — training
 - **FiveK training by camera**: `train.py --camera "Nikon D70" --download`
   fetches only that camera's DNGs, preprocesses them, and writes the split
   lists; `--list-cameras`, `--prepare-only`, multi-camera pooling. Built on
@@ -44,52 +52,40 @@ summarized; commit messages carry the full detail and measurements.
   demosaiced per training crop at load time: ~18 MB instead of ~216 MB per
   18 MP photo. Existing pairs are shrunk in place. `--delete-dngs` removes
   DNGs after preprocessing, in small batches to keep peak disk use low.
+- Parallel data loading (`--workers`), exact resume from full-state
+  checkpoints (`latest_state.pth`: optimizer, LR schedule, epoch/step) with
+  atomic saves, `--start_epoch` for weights-only checkpoints, data/compute
+  timing and per-epoch ETA, `--epochs`, `--device`.
+- Held-out evaluation (`--eval_every`, `--eval_images`, `--eval_crop`): raw
+  PSNR (real JPEG → raw, the OpenRAW direction) and rgb PSNR on test-split
+  centre crops, logged and written to `eval.csv`; `best.pth` keeps the best
+  model by raw PSNR across resumes.
+- Gradient checkpointing (`--checkpointing auto`, on below 12 GB): fits the
+  8-block network on 6 GB GPUs, identical gradients.
+- `--time_limit_hours`: stop cleanly between epochs before a session limit.
+- **`--gpus N`** multi-GPU data parallelism (one process per GPU,
+  hand-averaged gradients, disjoint sampling; rank 0 evaluates, saves and
+  decides when to stop). Exactly equivalent to batch size N.
+- **Kaggle training** (`kaggle/openraw_kaggle.ipynb` + `kaggle/kaggle_runner.py`):
+  one notebook that prepares a FiveK dataset within Kaggle's 20 GB, then
+  trains across 12 h GPU sessions on every GPU the session has, stopping
+  cleanly and resuming automatically. First real run: ~1,070 pooled images,
+  ~0.8 s/step on a T4, held-out raw PSNR 39.1 dB at epoch 35.
+
+### Added — project
 - **Logo**: aperture with a Bayer RGGB sensor tile in the lens opening,
   wordmark in Saira; light/dark SVGs, mono mark, avatar and social
   preview PNGs, all generated by `tools/logo/make_logo.py`.
-- **Batch conversion**: files and folders, `-r` recursive with mirrored
-  output tree, `--jobs` for parallel files. Re-runs skip finished outputs
-  (`--overwrite` to redo), a failing file never stops the batch, and
-  interrupted runs never leave truncated DNGs.
-- **Lossless-JPEG DNG compression** (tiled, 3-component) with a DNG
-  LinearizationTable at 12-bit by default: ~50 MB instead of ~108 MB for an
-  18 MP photo. `--bit-depth 16/14/12/10`, `--compression none`.
-- Multithreaded tile encoding (`--threads`), byte-identical at any count.
-- Embedded JPEG preview in the standard preview + SubIFD layout.
-- Camera EXIF passthrough (make, model, lens, exposure, ISO, focal length,
-  orientation, capture time). Never fabricated when absent; GPS never copied.
 - Packaging: `pyproject.toml`, `openraw` command, extras `[invisp]`,
-  `[dataprep]`, `[training]`, `[dev]`. `openraw --version` reports key
-  library versions for bug reports.
+  `[dataprep]`, `[training]`, `[dev]`.
 - CI on Linux/Windows/macOS, with Adobe's `dng_validate` and a clean-venv
   wheel install; `tools/build_dng_validate.sh` to run the validator locally.
-- Optional InvISP (CVPR 2021) learned path, `--invisp`, with vendored
-  upstream code and official checkpoints; training scaffolding for FiveK.
 
-### Fixed
-- Training: upstream's LR milestones (epochs 50/80 of 300, tuned for one
-  ~650-image camera) now scale with `--epochs`; the log suggests an
-  `--epochs` giving upstream's ~195k-step budget. cuDNN autotuning on CUDA.
-- Training on 6 GB GPUs crawled (7-21 s/step on an RTX 3050): a 256 px step
-  needs ~6.2 GB, and Windows silently spills the overflow into system RAM.
-  Gradient checkpointing (`--checkpointing auto`, on below 12 GB) cuts it to
-  ~2.5 GB with identical gradients; the log reports GPU memory and warns
-  when it's nearly full.
-- Training: upstream's GPU auto-select shelled out to `grep`/`rm` (absent on
-  Windows, so it failed every run) and set `CUDA_VISIBLE_DEVICES` after CUDA
-  was already touched; now queries `nvidia-smi` directly and selects by index.
-- `train.py` reported "no GPU" when the real cause was a CPU-only PyTorch
-  build (PyPI's default on Windows/macOS); it now says which of CPU build /
-  missing driver / old driver it is, with the fix. Install docs updated.
-- Training preprocessing assumed InvISP's two cameras: hardcoded RGGB
-  pattern, no black-level subtraction, hardcoded white levels. Now read per
-  file; demosaic border overshoot (~1.5× white) clipped.
-- `train.py` ran all setup at import time, which breaks multiprocessing's
-  spawn mode (always used on Windows).
-- Privacy: DNG ImageDescription embedded the full source path (e.g. your
-  user account name and folder layout); now only the filename.
+### Fixed — conversion and DNG output
 - DNGs rejected by Adobe-SDK readers (Android/Skia, Luminar): `DNGVersion`
   and other identity tags had ended up outside IFD0.
+- Privacy: DNG ImageDescription embedded the full source path (e.g. your
+  user account name and folder layout); now only the filename.
 - Debanding softened whole images (~40% measured detail loss); its
   correction is now clamped to one source quantization step.
 - Deflate-compressed DNGs were unreadable by libraw (replaced by
@@ -103,3 +99,28 @@ summarized; commit messages carry the full detail and measurements.
   for non-RGB JPEGs.
 - Rational EXIF values (e.g. f-number) were corrupted when given as plain
   integers.
+
+### Fixed — InvISP and training
+- InvISP checkpoints loaded with `strict=False`, so a file that didn't match
+  (e.g. a full-state checkpoint) silently loaded 0 of 280 weights and ran a
+  random network. Missing weights are now an error.
+- Training preprocessing assumed InvISP's two cameras: hardcoded RGGB
+  pattern, no black-level subtraction, hardcoded white levels. Now read per
+  file; demosaic border overshoot (~1.5× white) clipped.
+- Training on 6 GB GPUs crawled (7-21 s/step on an RTX 3050): a 256 px step
+  needs ~6.2 GB, and Windows silently spills the overflow into system RAM.
+  Fixed by gradient checkpointing; the log reports GPU memory and warns when
+  it's nearly full.
+- Upstream's LR milestones (epochs 50/80 of 300, tuned for one ~650-image
+  camera) now scale with `--epochs`; the log suggests an `--epochs` giving
+  upstream's training budget. cuDNN autotuning on CUDA.
+- `train.py` reported "no GPU" when the real cause was a CPU-only PyTorch
+  build (PyPI's default on Windows/macOS); it now says which of CPU build /
+  missing driver / old driver it is, with the fix.
+- Upstream's GPU auto-select shelled out to `grep`/`rm` (absent on Windows,
+  so it failed every run) and set `CUDA_VISIBLE_DEVICES` after CUDA was
+  already touched; now queries `nvidia-smi` directly and selects by index.
+- `train.py` ran all setup at import time, which breaks multiprocessing's
+  spawn mode (always used on Windows).
+- colour-science's "matplotlib not available" warning printed once per
+  preprocessing worker; silenced (only that message).

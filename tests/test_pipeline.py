@@ -190,3 +190,51 @@ def test_invisp_path_runs_real_network_and_writes_valid_dng(jpeg_path, tmp_path)
         page = main_page(tf)
         assert page.photometric == 34892
         assert page.dtype == np.uint16
+
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+NIKON = os.path.join(ROOT, "pretrained", "nikon.pth")
+
+
+@pytest.mark.skipif(not os.path.exists(NIKON), reason="pretrained/nikon.pth not present")
+def test_invisp_checkpoint_accepts_your_own_training_outputs(tmp_path):
+    """--invisp-checkpoint: a weights-only file (best.pth / latest.pth) and
+    train.py's full-state latest_state.pth must give exactly the same result
+    as the same weights loaded via the upstream camera name."""
+    torch = pytest.importorskip("torch")
+    from openraw.invisp_bridge import reconstruct_pseudo_raw
+    sd = torch.load(NIKON, map_location="cpu")
+    weights, state = str(tmp_path / "best.pth"), str(tmp_path / "latest_state.pth")
+    torch.save(sd, weights)
+    torch.save({"net": sd, "optimizer": {"state": {}, "param_groups": []}, "scheduler": {},
+                "epoch": 3, "step": 99, "best_raw_psnr": 39.0}, state)
+    img = np.random.default_rng(0).random((32, 48, 3)).astype(np.float32)
+    ref = reconstruct_pseudo_raw(img, camera="NIKON_D700", pretrained_dir=os.path.join(ROOT, "pretrained"))
+    assert np.array_equal(reconstruct_pseudo_raw(img, checkpoint=weights), ref)
+    assert np.array_equal(reconstruct_pseudo_raw(img, checkpoint=state), ref)
+
+
+@pytest.mark.skipif(not os.path.exists(NIKON), reason="pretrained/nikon.pth not present")
+def test_invisp_checkpoint_that_does_not_fit_is_a_clear_error(tmp_path):
+    """Upstream loaded with strict=False, so a non-matching file silently loaded
+    NOTHING (0 of 280 weights from a full-state dict), leaving a random network."""
+    torch = pytest.importorskip("torch")
+    from openraw.invisp_bridge import reconstruct_pseudo_raw
+    bad = str(tmp_path / "bad.pth")
+    torch.save({"model": torch.load(NIKON, map_location="cpu")}, bad)  # wrapped under an unknown key
+    with pytest.raises(ValueError, match="weights missing"):
+        reconstruct_pseudo_raw(np.zeros((8, 8, 3), np.float32), checkpoint=bad)
+    with pytest.raises(FileNotFoundError):
+        reconstruct_pseudo_raw(np.zeros((8, 8, 3), np.float32), checkpoint=str(tmp_path / "nope.pth"))
+
+
+@pytest.mark.skipif(not os.path.exists(NIKON), reason="pretrained/nikon.pth not present")
+def test_cli_invisp_checkpoint_flag(jpeg_path, tmp_path):
+    pytest.importorskip("torch")
+    import shutil
+    from openraw.cli import main
+    ck = str(tmp_path / "best.pth")
+    shutil.copy(NIKON, ck)
+    out = str(tmp_path / "out.dng")
+    assert main([jpeg_path, "-o", out, "--invisp-checkpoint", ck, "-q"]) == 0  # implies --invisp
+    assert os.path.getsize(out) > 0

@@ -1,5 +1,5 @@
 """
-openraw — reconstruct a pseudo-RAW (linear DNG) from a JPEG.
+openraw — reconstruct a pseudo-RAW DNG (linear or Bayer mosaic) from a JPEG.
 
 This is NOT real RAW recovery. JPEG is lossy and irreversible (8-bit,
 tone-curved, chroma-subsampled, DCT-quantized). What this pipeline produces

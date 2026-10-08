@@ -63,6 +63,7 @@ class PipelineConfig:
     invisp_camera: str = "NIKON_D700"
     invisp_pretrained_dir: str = "pretrained"
     invisp_device: str = "cpu"
+    invisp_checkpoint: str | None = None  # any trained checkpoint; overrides camera/dir
 
 
 @dataclass
@@ -92,6 +93,7 @@ class OpenRawPipeline:
                 camera=cfg.invisp_camera,
                 pretrained_dir=cfg.invisp_pretrained_dir,
                 device=cfg.invisp_device,
+                checkpoint=cfg.invisp_checkpoint,
             )
             # source_srgb_u8 must match linear's possibly-cropped shape
             # (reconstruct_pseudo_raw crops to even dimensions).

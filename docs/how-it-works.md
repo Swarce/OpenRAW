@@ -1,7 +1,8 @@
 # How it works
 
 OpenRAW turns an 8-bit, gamma-encoded, lossy JPEG into a 16-bit **linear**
-DNG. Each stage below is labelled by how much it can be trusted — the same
+DNG — or, with `--layout cfa`, a Bayer mosaic of the same linear data that
+your raw editor demosaics itself. Each stage below is labelled by how much it can be trusted — the same
 labels the module docstrings use — because the honest answer differs a lot
 between stages.
 
@@ -23,7 +24,7 @@ JPEG
  ▼
  │ bitdepth.py      8 -> 16 bit: flatness-gated dither + clamped debanding
  ▼
- │ dng_writer.py    lossless-JPEG tiled Linear DNG + preview + EXIF
+ │ dng_writer.py    lossless-JPEG tiled DNG (Linear, or CFA mosaic) + preview + EXIF
  ▼
 DNG
 ```

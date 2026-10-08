@@ -48,6 +48,19 @@ training amount (~195k steps) for however many images fit the budget.
 
 ## What to expect
 
+Measured on the first real run: the 18 GB budget held ~1,070 training images
+from the pooled FiveK cameras, which auto-selected 182 epochs; one T4 did
+~0.8 s per step, ~14 minutes per epoch, so a 12 h session covered ~45 epochs.
+Held-out raw PSNR was 39.1 dB at epoch 35.
+
+**Evaluation cadence.** By default the model is evaluated ~10 times per run
+(every 18 epochs for 182), so a session can pass with few or no `[EVAL]`
+lines. Each evaluation takes ~30 s; to evaluate more often, pass extra
+arguments in the notebook's last cell:
+`kr.run(..., extra_train_args=["--eval_every", "6"])`. Every result is also
+in `exps/<task>/eval.csv` in the output, which Kaggle keeps even when its log
+viewer trims old lines.
+
 - On a 16 GB Kaggle GPU, gradient checkpointing turns off automatically (a step
   needs ~6.2 GB), so steps are ~25% cheaper than on a 6 GB laptop GPU.
 - Measured on one T4: ~0.8 s per step. With both, each GPU takes its own
@@ -59,8 +72,8 @@ training amount (~195k steps) for however many images fit the budget.
 - The total depends on the GPU Kaggle assigns and how many images fit;
   probably a few sessions spread over one to two weeks of free quota. Each
   session's log prints epoch times and an ETA.
-- Use the result: download `best.pth` from the output, put it in `pretrained/`,
-  and run `openraw photo.jpg --invisp`.
+- Use the result: download `best.pth` from the output and run
+  `openraw photo.jpg --invisp-checkpoint best.pth`.
 
 ## How it's tested
 

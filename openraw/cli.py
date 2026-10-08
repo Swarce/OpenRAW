@@ -52,7 +52,7 @@ def _version_report() -> str:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="openraw",
-        description="Reconstruct pseudo-RAW linear DNGs from JPEGs (part of the OpenRAW project).",
+        description="OpenRAW: turn JPEGs into editable raw DNGs (linear, or a Bayer mosaic with --layout cfa).",
     )
     p.add_argument("--version", action="store_true",
                    help="show package and library versions (include this in bug reports)")
@@ -97,6 +97,9 @@ def _build_parser() -> argparse.ArgumentParser:
     m.add_argument("--invisp", action="store_true", help="use the InvISP network instead of the classical stages")
     m.add_argument("--invisp-camera", choices=["NIKON_D700", "Canon_EOS_5D"], default="NIKON_D700")
     m.add_argument("--invisp-pretrained-dir", default="pretrained")
+    m.add_argument("--invisp-checkpoint", metavar="PATH",
+                   help="use this checkpoint instead of an upstream camera one -- e.g. the best.pth "
+                        "(or latest_state.pth) from your own training run; implies --invisp")
     m.add_argument("--invisp-device", default="cpu", help="'cpu' or 'cuda:0' etc.")
     return p
 
@@ -110,10 +113,11 @@ def _config_from_args(a) -> PipelineConfig:
         experimental_gamut_widen=a.gamut_widen,
         dither=not a.no_dither,
         deband=not a.no_deband,
-        use_invisp=a.invisp,
+        use_invisp=a.invisp or bool(a.invisp_checkpoint),
         invisp_camera=a.invisp_camera,
         invisp_pretrained_dir=a.invisp_pretrained_dir,
         invisp_device=a.invisp_device,
+        invisp_checkpoint=a.invisp_checkpoint,
         dng_compression=a.compression,
         dng_bit_depth=a.bit_depth,
         encode_threads=a.threads or None,

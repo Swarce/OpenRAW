@@ -7,7 +7,7 @@
 
 # OpenRAW
 
-**Turn JPEGs into editable linear DNGs** — more room to push exposure,
+**Turn JPEGs into editable raw DNGs** — more room to push exposure,
 shadows, and colors in Lightroom, Luminar, darktable, RawTherapee, or any
 raw editor, from cameras and phones that never gave you a raw file.
 
@@ -55,6 +55,7 @@ openraw photo.jpg                     # -> photo.dng next to it
 openraw photo.jpg -o edited/          # into a folder
 openraw ~/Pictures/trip -r -o dngs/   # a whole folder tree, structure kept
 openraw ~/Pictures/trip -r --jobs 2   # two photos at a time
+openraw photo.jpg --layout cfa        # Bayer mosaic, like a camera raw (see below)
 ```
 
 Batch runs are safe to interrupt and re-run: finished files are skipped
@@ -89,6 +90,14 @@ present — never invented when absent. **GPS location is never copied**, and
 neither is the folder path of your source files.
 
 Run `openraw --help` for every option.
+
+### Learned reconstruction (experimental)
+
+`--invisp` swaps the classical stages for **InvISP**, an invertible neural
+network, using upstream's Nikon or Canon checkpoints — or
+`--invisp-checkpoint best.pth` for a model you trained yourself on
+MIT-Adobe FiveK, locally or on Kaggle's free GPUs. Needs PyTorch:
+`pip install ".[invisp]"`. See [docs/invisp.md](docs/invisp.md).
 
 ## Tips
 
