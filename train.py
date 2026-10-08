@@ -75,15 +75,26 @@ if __name__ == "__main__":
         _fp.list_cameras(args.data_path)
         raise SystemExit(0)
     _queries = [q.strip() for c in (args.camera or []) for q in c.split(",") if q.strip()]
+    # folders prepared from other datasets (data/raise_prepare.py: RAISE_*) are used as they are
+    _other = [q for q in _queries if q.startswith(_fp.OTHER_SOURCE_PREFIXES)]
+    _queries = [q for q in _queries if q not in _other]
     if args.all_downloaded:
         _found = _fp.downloaded_cameras(args.data_path)
-        if not _found:
-            raise SystemExit(f"[data] --all-downloaded: no camera folders with DNGs under {args.data_path}fivek/raw/")
-        print(f"[data] found {len(_found)} downloaded camera(s): " + ", ".join(_found))
+        _other += [c for c in _fp.prepared_other_sources(args.data_path) if c not in _other]
+        if not _found and not _other:
+            raise SystemExit(f"[data] --all-downloaded: no camera folders with DNGs under {args.data_path}fivek/raw/ "
+                             f"and no prepared RAISE_* folders in {args.data_path}")
+        print(f"[data] found {len(_found) + len(_other)} camera(s): " + ", ".join(_found + _other))
         _queries += [c for c in _found if c not in _queries]
-    args.camera = _fp.prepare_cameras(_queries or ["NIKON_D700"], args.data_path, download=args.download,
-                                      jobs=args.download_jobs, use_available=args.all_downloaded,
-                                      delete_dngs=args.delete_dngs)
+    for _c in _other:
+        if not (os.path.isfile(os.path.join(args.data_path, f"{_c}_train.txt"))
+                and os.path.isdir(os.path.join(args.data_path, _c, "RAW"))):
+            raise SystemExit(f"[data] {_c}: not prepared in {args.data_path} (run data/raise_prepare.py first)")
+    if not _queries and not _other:
+        _queries = ["NIKON_D700"]  # upstream's default camera
+    args.camera = (_fp.prepare_cameras(_queries, args.data_path, download=args.download, jobs=args.download_jobs,
+                                       use_available=args.all_downloaded, delete_dngs=args.delete_dngs)
+                   if _queries else []) + _other
     if args.prepare_only:
         print("[data] prepared:", ", ".join(args.camera))
         raise SystemExit(0)

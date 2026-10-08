@@ -186,6 +186,64 @@ def prepare(cameras="all", budget_gb: float = 18.0, out: Path = None, jobs: int 
     return done_cams
 
 
+def find_raise_csv(root: Path = None) -> Path | None:
+    """The RAISE list (CSV with a NEF column) among the attached inputs."""
+    root = Path(root or INPUT)
+    for p in sorted(root.rglob("*.csv")) if root.is_dir() else []:
+        try:
+            head = p.open(encoding="utf-8-sig", errors="replace").readline()
+        except OSError:
+            continue
+        if "nef" in [h.strip().strip('"').lower() for h in head.split(",")]:
+            return p
+    return None
+
+
+def prepare_raise(csv_path, budget_gb: float = 18.0, out: Path = None, cameras=(), start: int = 0,
+                  chunk: int = 60, jobs: int = 4, workers: int | None = None) -> list[str]:
+    """Download + preprocess RAISE NEFs from `csv_path` (see data/raise_prepare.py)
+    into out, in chunks of `chunk` images, stopping before the output would pass
+    budget_gb. NEFs are deleted as they're processed. start: skip that many
+    selected images -- to prepare the next part in another session (the log
+    says where to continue). Returns the camera folders prepared."""
+    sys.path.insert(0, str(REPO / "data"))
+    import raise_prepare as rp
+
+    out = Path(out or WORKING / DATA_DIR)
+    out.mkdir(parents=True, exist_ok=True)
+    rows = rp.select(rp.read_list(csv_path), list(cameras))
+    log(f"RAISE list {csv_path}: {len(rows)} images ({rp.summary(rows)}); starting at #{start}")
+    pos = start
+    while pos < len(rows):
+        used = _du_gb(out)
+        n_pairs = sum(1 for _ in out.glob("*/RAW/*.npz"))
+        per_pair = (used * 1e3 / n_pairs) if n_pairs else EST_PAIR_MB
+        n = min(chunk, len(rows) - pos)
+        if used + n * per_pair / 1e3 > budget_gb:
+            n = int((budget_gb - used) * 1e3 / per_pair)
+            if n <= 0:
+                break
+        cmd = [sys.executable, str(REPO / "data" / "raise_prepare.py"), "--csv", str(csv_path), "--download",
+               "--delete-nefs", "--data-path", str(out) + "/", "--jobs", str(jobs),
+               "--start", str(pos), "--count", str(n)]
+        for c in cameras:
+            cmd += ["--camera", c]
+        if workers:
+            cmd += ["--workers", str(workers)]
+        if subprocess.call(cmd) != 0:
+            log(f"RAISE images #{pos}-#{pos + n - 1} failed -- continuing")
+        pos += n
+    shutil.rmtree(out / "raise", ignore_errors=True)  # only the (emptied) NEF download folders
+    cams = sorted(p.parent.parent.name for p in out.glob(f"{rp.PREFIX}*/RAW/*.npz"))
+    cams = sorted(set(cams))
+    log(f"prepared {sum(1 for _ in out.glob(f'{rp.PREFIX}*/RAW/*.npz'))} RAISE pairs ({', '.join(cams)}), "
+        f"{_du_gb(out):.1f} GB in {out}")
+    if pos < len(rows):
+        log(f"budget reached: {len(rows) - pos} images left. To prepare them, run again in a NEW notebook "
+            f"(its own output) with RAISE_START = {pos}")
+    return cams
+
+
 # -------------------------------------------------------------------- train
 def _gpu_count() -> int:
     try:
@@ -287,8 +345,20 @@ def write_status(task: str, epochs: int) -> str:
 
 # ---------------------------------------------------------------------- main
 def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, session_start=None,
-        extra_train_args=None, gpus=0):
+        extra_train_args=None, gpus=0, raise_csv=None, raise_cameras=(), raise_start=0):
+    """raise_csv: prepare RAISE instead of FiveK or training -- a path, or True
+    to use the CSV with a NEF column among the attached inputs."""
     session_start = session_start or time.time()
+    if raise_csv:
+        csv_path = find_raise_csv(INPUT) if raise_csv is True else Path(raise_csv)
+        if not csv_path or not Path(csv_path).exists():
+            raise SystemExit("RAISE: no CSV found. Attach the CSV from the RAISE download page as a dataset, "
+                             "or give its path as RAISE_CSV.")
+        log("RAISE_CSV set -> RAISE PREPARE mode")
+        prepare_raise(csv_path, budget_gb=budget_gb, cameras=raise_cameras, start=raise_start)
+        log("Next: 'Save Version' finishes, then on this notebook's output page choose 'New Dataset', and "
+            "attach that dataset to the training notebook next to the FiveK one.")
+        return "prepared RAISE"
     roots = find_data_roots(INPUT)
     if not roots:
         log("no prepared data attached -> PREPARE mode")

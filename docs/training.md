@@ -54,6 +54,56 @@ train/test lists, then trains. Re-running skips everything already done.
 The standalone tools work too: `data/fivek_download.py` (download by camera,
 optionally expert TIFFs) and `data/fivek_prepare.py --camera ... --download`.
 
+## More data: RAISE
+
+[RAISE](https://loki.disi.unitn.it/RAISE/) adds 8,156 raws from three Nikon
+DSLRs (D40, D90, D7000), shot by four photographers across Europe: more
+scenes and more sensors than FiveK alone. Its license allows
+**non-commercial research and educational use** only (see `NOTICE.md`).
+
+1. On the [RAISE download page](https://loki.disi.unitn.it/RAISE/download.html)
+   pick a package (RAISE-1k, 2k, 4k, 6k, All, or a custom selection by
+   category and camera), accept the terms, and save the CSV it gives you.
+   It lists every image with its NEF download link.
+2. Prepare it:
+
+   ```bash
+   python data/raise_prepare.py --csv RAISE_1k.csv --list           # what's in it, per camera
+   python data/raise_prepare.py --csv RAISE_1k.csv --download --delete-nefs
+   python data/raise_prepare.py --csv RAISE_all.csv --download --camera D90 --count 1500
+   ```
+
+   `--camera`, `--category` (e.g. `Outdoor`), `--start` and `--count` pick a
+   subset; re-running skips finished images, so a big list can be prepared
+   in parts. Each NEF goes through the same preprocessing as a FiveK DNG
+   (CFA pattern, black and white level read per file) into
+   `data/RAISE_Nikon_D90/` etc. RAISE has no official split: ~10% of images
+   go to test by a fixed hash of their name, so adding images later never
+   moves one between splits.
+3. Train: `--all-downloaded` picks up the `RAISE_*` folders next to every
+   FiveK camera; or name them, e.g. `--camera RAISE_Nikon_D90`.
+
+A RAISE pair takes ~12-17 MB (12-16 MP), like a FiveK one. The NEFs are
+downloaded one by one from the RAISE server; with `--delete-nefs` peak disk
+use stays at a few hundred MB.
+
+**Adding data to a run in progress** changes the held-out test set, so its
+raw PSNR is no longer comparable with earlier evaluations, and `best.pth`
+(kept by that score) would compare the two. It also changes the
+automatically chosen epoch count, and with it where the learning-rate drops
+land. Start a new `--task` for the bigger dataset instead. To start it from
+an existing model rather than from scratch, put that model's weights where
+`--resume` looks for them:
+
+```bash
+mkdir -p exps/fivek_raise/checkpoint
+cp exps/<old task>/checkpoint/best.pth exps/fivek_raise/checkpoint/latest.pth
+python train.py --task fivek_raise --all-downloaded --resume --gamma --aug
+```
+
+A weights-only `latest.pth` starts at epoch 0 with the full learning-rate
+schedule, on the new data.
+
 ## Data layout
 
 ```

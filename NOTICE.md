@@ -127,12 +127,21 @@ retouching, architecturally unrelated to InvISP's invertible network. If
 this project ever integrates that approach too, it needs its own
 attribution section here, done the same way — not folded into this one.
 
-## Training data (planned, not yet implemented)
+## Training data
 
-When/if training data is added to this project, it should come from
-existing paired RAW/JPEG research datasets with their own usage terms
-(e.g. MIT-Adobe FiveK, NUS, RAISE — the same datasets InvISP itself
-trains on), not scraped web images.
+Training data is not included in this repository; the scripts download it
+from each dataset's own server, under that dataset's own terms:
+
+- **MIT-Adobe FiveK** (Bychkovsky, Paris, Chan & Durand, CVPR 2011) —
+  `data/fivek_download.py`, `data/fivek_prepare.py`.
+- **RAISE** (Dang-Nguyen, Pasquini, Conotter & Boato, "RAISE: A Raw Images
+  Dataset for Digital Image Forensics", ACM MMSys 2015) —
+  `data/raise_prepare.py`. RAISE's terms: *"to be used for non-commercial
+  research and educational purposes"*, and published work using it should
+  cite the paper. The list of download links comes from
+  <https://loki.disi.unitn.it/RAISE/>, where the terms are accepted. A model
+  trained on RAISE images falls under those terms; none of the weights in
+  `pretrained/` have been trained on RAISE so far.
 
 ## Logo font: Saira (SIL Open Font License 1.1)
 

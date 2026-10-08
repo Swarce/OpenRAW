@@ -52,6 +52,12 @@ summarized; commit messages carry the full detail and measurements.
   lists; `--list-cameras`, `--prepare-only`, multi-camera pooling. Built on
   `data/fivek_download.py`, sharing its `data/fivek/raw/<Make_Model>/`
   layout; `--all-downloaded` trains on every camera found there.
+- **RAISE as a second training source** (`data/raise_prepare.py`): reads
+  the CSV from RAISE's download page, downloads NEFs (by camera, category or
+  range; resumable, `--delete-nefs`), preprocesses them like FiveK DNGs into
+  `RAISE_<Make_Model>/` folders with a fixed hash-based test split. Picked up
+  by `--all-downloaded` and the Kaggle runner (`RAISE_CSV = True` prepares it
+  within the output budget, in parts). Non-commercial research use only.
 - Compact training storage: the sensor mosaic as 4 lossless-JPEG planes,
   demosaiced per training crop at load time: ~18 MB instead of ~216 MB per
   18 MP photo. Existing pairs are shrunk in place. `--delete-dngs` removes

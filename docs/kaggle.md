@@ -13,10 +13,11 @@ week** (TPU quota is separate, but InvISP isn't ported to TPUs), **20 GB** of sa
    Notebook → upload `kaggle/openraw_kaggle.ipynb`.
 2. **Internet on**: notebook Settings → Internet (needs a phone-verified
    Kaggle account).
-3. **GitHub token** (the repo is private): create a fine-grained GitHub token
-   with *read-only Contents* access to the repo, then in the notebook: Add-ons
-   → Secrets → add it named `GITHUB_TOKEN`. It's read at runtime, never shown
-   or saved; the notebook removes it from the clone afterwards.
+3. **GitHub token** (optional now that the repo is public): to clone with a
+   token anyway, create a fine-grained GitHub token with *read-only
+   Contents* access to the repo, then in the notebook: Add-ons → Secrets →
+   add it named `GITHUB_TOKEN`. It's read at runtime, never shown or saved;
+   the notebook removes it from the clone afterwards.
 4. Edit the config cell if you like (`CAMERAS`, `DATA_BUDGET_GB`, `EPOCHS`).
 
 ## Run 1 — prepare the data (CPU, no GPU quota)
@@ -46,6 +47,29 @@ week** (TPU quota is separate, but InvISP isn't ported to TPUs), **20 GB** of sa
 
 `EPOCHS = None` picks the epoch count that matches upstream InvISP's
 training amount (~195k steps) for however many images fit the budget.
+
+## More data: RAISE (optional)
+
+RAISE (8,156 Nikon raws; **non-commercial research use only**, see
+`NOTICE.md`) is prepared by the same notebook in a separate run, into its own
+dataset:
+
+1. Get the CSV from the [RAISE download page](https://loki.disi.unitn.it/RAISE/download.html)
+   (pick a package, accept the terms). Upload it as a small Kaggle dataset
+   and attach it to a **new copy** of the notebook (its output must not mix
+   with the training notebook's).
+2. In the config cell set `RAISE_CSV = True` (optionally `RAISE_CAMERAS = ["D90"]`).
+   Accelerator **None**, Internet on, Save & Run All.
+3. It downloads and preprocesses images until the output reaches
+   `DATA_BUDGET_GB` (~1,100-1,400 images in 18 GB), deleting each NEF as it
+   goes. If images are left, the log says so and gives the `RAISE_START`
+   value for preparing the next part in another copy of the notebook.
+4. Output → **New Dataset**, then attach it to the training notebook next to
+   the FiveK dataset. Training uses both.
+
+Attach it when starting a **new** `TASK`, not in the middle of a run: more
+data changes the test set (so raw PSNR is no longer comparable with earlier
+evaluations) and the automatic epoch count.
 
 ## What to expect
 

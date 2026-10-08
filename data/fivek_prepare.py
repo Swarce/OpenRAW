@@ -57,6 +57,8 @@ import fivek_download as fk  # noqa: E402  (the user's downloader, used as a lib
 # train/test lists; keep both so results stay comparable to canon/nikon.pth.
 LEGACY_DIRS = {fk.norm("Nikon D700"): "NIKON_D700", fk.norm("Canon EOS 5D"): "Canon_EOS_5D"}
 JPEG_QUALITY = 90  # same as upstream
+# camera folders prepared from other datasets (data/raise_prepare.py), used as-is
+OTHER_SOURCE_PREFIXES = ("RAISE_",)
 
 
 def camera_dir_name(label: str) -> str:
@@ -75,6 +77,8 @@ def downloaded_cameras(data_root="./data/", log=print) -> list[str]:
     holds at least one DNG, plus every camera that's already preprocessed (its
     DNGs may have been deleted). Folders that match no FiveK camera are reported."""
     root = Path(data_root) / "fivek" / "raw"
+    if not root.is_dir() and not (Path(data_root) / "fivek" / "_metadata").is_dir():
+        return []  # no FiveK data here at all (e.g. only RAISE): nothing to look up
     items = fk.load_metadata(Path(data_root) / "fivek" / "_metadata", list(fk.SPLIT_FILES))
     labels = fk.build_camera_index(items)
     by_folder = {fk.folder_name(*label.split(" ", 1)): label for label in labels}
@@ -93,6 +97,20 @@ def downloaded_cameras(data_root="./data/", log=print) -> list[str]:
         if label not in found and raw.is_dir() and any(raw.glob("*.npz")):
             found.append(label)
     return found
+
+
+def prepared_other_sources(data_root="./data/") -> list[str]:
+    """Prepared camera folders from datasets other than FiveK -- RAISE_*,
+    written by data/raise_prepare.py: a <Cam>_train.txt next to <Cam>/RAW/
+    holding pairs. They need no further preparation."""
+    root = Path(data_root)
+    out = []
+    for lst in sorted(root.glob("*_train.txt")):
+        cam = lst.name[: -len("_train.txt")]
+        if cam.startswith(OTHER_SOURCE_PREFIXES) and (root / cam / "RAW").is_dir() \
+                and any((root / cam / "RAW").glob("*.npz")):
+            out.append(cam)
+    return out
 
 
 # --------------------------------------------------------------------------- #

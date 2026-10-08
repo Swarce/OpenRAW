@@ -1,5 +1,8 @@
 # Training data: MIT-Adobe FiveK
 
+> RAISE (8,156 Nikon raws) can be added with `data/raise_prepare.py`; see
+> [docs/training.md](../docs/training.md#more-data-raise).
+
 > **Most users want `train.py --camera ... --download`** — see
 > [docs/training.md](../docs/training.md). It works for any FiveK camera and
 > handles download, preprocessing and splits. This page documents the
