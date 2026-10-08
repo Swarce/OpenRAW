@@ -67,6 +67,9 @@ summarized; commit messages carry the full detail and measurements.
 - Gradient checkpointing (`--checkpointing auto`, on below 12 GB): fits the
   8-block network on 6 GB GPUs, identical gradients.
 - `--time_limit_hours`: stop cleanly between epochs before a session limit.
+- `--log_every N` (default 50): one step line per N steps with averaged
+  losses, and mean losses on each epoch line. Per-step printing made long
+  runs' logs (~50,000 lines per Kaggle session) slow to view.
 - **`--gpus N`** multi-GPU data parallelism (one process per GPU,
   hand-averaged gradients, disjoint sampling; rank 0 evaluates, saves and
   decides when to stop). Exactly equivalent to batch size N.

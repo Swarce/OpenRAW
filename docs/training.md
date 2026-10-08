@@ -124,6 +124,13 @@ clipped values that can't be recovered.
 random crop/flip/rotate; also `--batch_size`, `--lr`, `--loss`, `--epochs`
 (default 300).
 
+**Log volume.** A step line is printed every `--log_every` steps (default
+50), with the losses and timings averaged over those steps, plus the first
+step and the last step of each epoch. Each `[INFO] Epoch N time:` line also
+gives that epoch's mean losses. `--log_every 1` prints every step, as
+upstream did; that's tens of thousands of lines per run, which makes
+notebook log viewers (Kaggle's especially) slow to scroll and search.
+
 **How long to train.** Upstream's 300 epochs were chosen for one camera
 (~650 images, ~195,000 steps). Pooling many cameras at 300 epochs multiplies
 that -- ~4,000 images is ~1.2M steps. One 256 px step is ~1.5 TFLOP (measured,

@@ -62,6 +62,13 @@ arguments in the notebook's last cell:
 in `exps/<task>/eval.csv` in the output, which Kaggle keeps even when its log
 viewer trims old lines.
 
+**Log size.** Training prints a step line every 50 steps (averaged over
+them), so a 12 h session logs around a thousand lines instead of ~50,000.
+Kaggle's log viewer gets very slow with long logs; to find an `[EVAL]` line
+or an epoch boundary, search for `[EVAL]` or `Epoch 47 time`. Sessions
+started before this change keep the per-step output; this applies from the
+next session, since the notebook clones the repository at the start.
+
 - On a 16 GB Kaggle GPU, gradient checkpointing turns off automatically (a step
   needs ~6.2 GB), so steps are ~25% cheaper than on a 6 GB laptop GPU.
 - Measured on one T4: ~0.8 s per step. With both, each GPU takes its own

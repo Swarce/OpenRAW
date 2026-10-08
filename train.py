@@ -52,6 +52,9 @@ if __name__ == "__main__":
     parser.add_argument("--eval_every", type=int, default=0,
                         help="evaluate on held-out test images every N epochs (default: ~10 times per run, "
                              "plus the last epoch); 0 = auto, -1 = never")
+    parser.add_argument("--log_every", type=int, default=50,
+                        help="print a step line every N steps, with losses averaged over them (default 50; 1 = every "
+                             "step, as upstream). Per-step lines can swamp notebook log viewers.")
     parser.add_argument("--eval_images", type=int, default=40, help="max test images per evaluation (spread across cameras)")
     parser.add_argument("--eval_crop", type=int, default=512, help="centre crop size for evaluation")
     parser.add_argument("--checkpointing", choices=["auto", "on", "off"], default="auto",
@@ -366,12 +369,17 @@ def main(args, rank=0, world=1):
 
     print("[INFO] Start to train")
     run_start, epochs_done, start_step = time.time(), 0, step
+    log_every = max(1, getattr(args, "log_every", 50) or 1)
     params = list(net.parameters())
     for epoch in range(start_epoch, args.epochs):
         if sampler is not None:
             sampler.set_epoch(epoch)  # a different shuffle each epoch, the same on every process
         epoch_time = time.time()
         data_t0 = time.time()
+        # running sums for --log_every: kept on the device and only read when a
+        # line is printed, so steps between log lines don't wait on a GPU sync
+        win = torch.zeros(3, device=device); win_n = 0; win_data = win_compute = 0.0
+        ep_sum = torch.zeros(3, device=device); ep_n = 0
         for i_batch, sample_batched in enumerate(dataloader):
             data_time = time.time() - data_t0  # waiting for the loader -- upstream didn't count this
             step_time = time.time()
@@ -395,9 +403,16 @@ def main(args, rank=0, world=1):
                 _average_gradients(params, world)
             optimizer.step()
 
-            print("task: %s Epoch: %d Step: %d || loss: %.5f raw_loss: %.5f rgb_loss: %.5f || lr: %f || data %.3fs compute %.3fs" % (
-                args.task, epoch, step, loss.detach().cpu().numpy(), raw_loss.detach().cpu().numpy(),
-                rgb_loss.detach().cpu().numpy(), optimizer.param_groups[0]['lr'], data_time, time.time() - step_time))
+            losses = torch.stack([loss.detach(), raw_loss.detach(), rgb_loss.detach()])
+            win += losses; ep_sum += losses; win_n += 1; ep_n += 1
+            win_data += data_time; win_compute += time.time() - step_time
+            last_in_epoch = i_batch == len(dataloader) - 1
+            if win_n >= log_every or step == start_step or last_in_epoch:
+                l, r, g = (win / win_n).tolist()
+                print("task: %s Epoch: %d Step: %d || loss: %.5f raw_loss: %.5f rgb_loss: %.5f || lr: %f || data %.3fs compute %.3fs%s" % (
+                    args.task, epoch, step, l, r, g, optimizer.param_groups[0]['lr'], win_data / win_n,
+                    win_compute / win_n, f" (mean of {win_n} steps)" if win_n > 1 else ""))
+                win.zero_(); win_n = 0; win_data = win_compute = 0.0
             if step == start_step and device.type == "cuda":
                 used = torch.cuda.max_memory_reserved(device) / 2**30
                 print(f"[INFO] GPU memory after first step: {used:.2f} of {gpu_gb:.1f} GB")
@@ -442,8 +457,10 @@ def main(args, rank=0, world=1):
         epochs_done += 1
         took = time.time() - epoch_time
         left = (time.time() - run_start) / epochs_done * (args.epochs - epoch - 1)
-        print("[INFO] Epoch %d time: %.1fs | ETA for remaining %d epoch(s): %.1f h | task: %s" % (
-            epoch, took, args.epochs - epoch - 1, left / 3600, args.task))
+        m = (ep_sum / max(ep_n, 1)).tolist()
+        print("[INFO] Epoch %d time: %.1fs | mean loss %.5f raw_loss %.5f rgb_loss %.5f | "
+              "ETA for remaining %d epoch(s): %.1f h | task: %s" % (
+                  epoch, took, m[0], m[1], m[2], args.epochs - epoch - 1, left / 3600, args.task))
         # PATCHED (OpenRAW): time budget. Stop BETWEEN epochs -- the checkpoint for
         # this one is already saved -- if the next one (with a 15% margin for an
         # evaluation pass) wouldn't finish in time, instead of being killed mid-save.
