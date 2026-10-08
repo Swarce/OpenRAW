@@ -1,0 +1,16 @@
+# Normalise text files to LF in the repository, whatever the OS's settings
+* text=auto eol=lf
+
+# Binary: never diffed or converted
+*.pth   binary
+*.dng   binary
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
+*.ttf   binary
+*.zip   binary
+
+# Keep GitHub's language statistics about OpenRAW's own code
+openraw/third_party/** linguist-vendored
+tools/logo/fonts/**    linguist-vendored
+assets/logo/*.svg      linguist-generated

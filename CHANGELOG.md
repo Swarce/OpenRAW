@@ -84,6 +84,14 @@ summarized; commit messages carry the full detail and measurements.
   `[dataprep]`, `[training]`, `[dev]`.
 - CI on Linux/Windows/macOS, with Adobe's `dng_validate` and a clean-venv
   wheel install; `tools/build_dng_validate.sh` to run the validator locally.
+- CI: a PyTorch (CPU) job, so InvISP, training-loop, multi-process and
+  Kaggle-runner tests run (they were skipped in every other job); job
+  timeouts; docs-only changes skip the test jobs and get a Markdown link
+  check (`tools/check_links.py`) instead. Dependabot for GitHub Actions.
+- Repository: `.gitattributes` (LF line endings on every OS, binary files
+  marked, vendored code excluded from language statistics), `.gitignore`
+  covering training data/outputs and editor files, issue forms and a PR
+  template.
 
 ### Fixed — conversion and DNG output
 - DNGs rejected by Adobe-SDK readers (Android/Skia, Luminar): `DNGVersion`

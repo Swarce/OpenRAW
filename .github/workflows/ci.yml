@@ -3,7 +3,17 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:  # docs-only changes are checked by docs.yml instead
+      - "**/*.md"
+      - "docs/**"
+      - "assets/**"
+      - "LICENSE"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "assets/**"
+      - "LICENSE"
   workflow_dispatch:
 
 concurrency:  # a newer push cancels the older run on the same branch
@@ -17,11 +27,12 @@ jobs:
   test:
     name: tests (${{ matrix.os }}, py${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       # Private-repo minutes bill Windows at 2x and macOS at 10x, so the matrix
       # is deliberate: full Python range on Linux, oldest+newest on Windows
-      # (3.14 is a real user's setup), one macOS job.
+      # (3.14 is the main development setup), one macOS job.
       matrix:
         include:
           - { os: ubuntu-latest,  python: "3.10" }
@@ -46,6 +57,7 @@ jobs:
     # lenient and once let a broken file through that Skia and Luminar rejected.
     name: tests + Adobe dng_validate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -73,11 +85,35 @@ jobs:
           python -m pytest -q -k adobe_dng_validate -rs | tee adobe.txt
           ! grep -q "dng_validate not available" adobe.txt
 
+  torch:
+    # The other jobs don't install PyTorch, so every InvISP, training-loop,
+    # multi-process and Kaggle-runner test skips there. CPU wheels keep it fast;
+    # training tests use a small network and gloo instead of NCCL.
+    name: tests with PyTorch (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[dev]"
+      - name: Test
+        run: |
+          python -m pytest -q -rs | tee torch.txt
+          # these tests must have RUN here -- skipping them is what this job prevents
+          ! grep -qE "could not import 'torch'|needs torch installed" torch.txt
+
   package:
     # Build the wheel and install it into a CLEAN venv with a fresh dependency
     # resolve -- that's how the tifffile-version bug was found.
     name: build + install wheel
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

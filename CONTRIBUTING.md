@@ -75,7 +75,10 @@ behind it, and the dead ends already explored.
 - Keep each PR focused; include tests for behavior changes and bug fixes
   (a regression test that fails without the fix is ideal).
 - CI runs the suite on Linux, Windows and macOS, a job with Adobe's
-  `dng_validate`, and a clean-venv install of the built wheel.
+  `dng_validate`, a job with PyTorch (CPU) so the InvISP and training tests
+  actually run, and a clean-venv install of the built wheel. Docs-only
+  changes skip those and get a Markdown link check instead — run it locally
+  with `python tools/check_links.py`.
 - Explain *why* in the commit message, not just what — especially for
   anything touching DNG structure.
 - Don't commit sample photos you don't have the rights to share.

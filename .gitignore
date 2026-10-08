@@ -1,11 +1,45 @@
+# Python
 __pycache__/
 *.pyc
 .pytest_cache/
-examples/*.dng
-examples/*.png
-!examples/deblock_comparison.png
-.dng_validate_build/
 build/
 dist/
 *.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Conversion outputs
+*.dng
+*.partial
+examples/*.png
+!examples/deblock_comparison.png
+
+# Training data and outputs (train.py, data/fivek_prepare.py, the Kaggle
+# notebook). FiveK DNGs and prepared pairs run to many GB.
+exps/
+data/fivek/
+data/*/RAW/
+data/*/RGB/
+data/*/DNG/
+openraw-data/
+# split lists generated for other cameras; InvISP's published lists stay tracked
+data/*_train.txt
+data/*_test.txt
+!data/Canon_EOS_5D_train.txt
+!data/Canon_EOS_5D_test.txt
+!data/NIKON_D700_train.txt
+!data/NIKON_D700_test.txt
+# checkpoint downloads (Kaggle saves .pth files as .zip)
+*.zip
+
+# Tools
+.dng_validate_build/
 tools/logo/.inst_*.ttf
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
