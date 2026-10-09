@@ -241,6 +241,29 @@ def _rgb_to_mosaic(rgb16: np.ndarray, pattern: str = CFA_PATTERN, pad: int = CFA
     return np.ascontiguousarray(np.take_along_axis(rgb16, idx[..., None], 2)[..., 0])
 
 
+def olpf_prefilter(rgb16: np.ndarray, strength: float) -> np.ndarray:
+    """Emulate a sensor's optical low-pass ("anti-aliasing") filter before
+    Bayer sampling: a 4-dot birefringent OLPF splits each point into four
+    copies 1 px apart, i.e. a separable [s/4, 1-s/2, s/4] blur; strength 1 =
+    a full-strength filter, 0 = none (returns the input unchanged).
+
+    Measured (docs/dng-format.md): at 0.5, false-colour moire on fine neutral
+    detail (a zone plate) through AHD drops by half or more, and a real
+    photo's round trip through AHD improves (51.9 -> 53.1 dB), at the cost of
+    ~15% edge energy -- the softness of a camera with an AA filter. Little
+    help on saturated single-colour patterns. Against the Sony NEX-7's real
+    raws it scores a hair closer (+0.02 dB). Softens graphics/text: use the
+    linear layout there."""
+    if not strength:
+        return rgb16
+    if not 0 < strength <= 1:
+        raise ValueError(f"OLPF strength must be in (0, 1], got {strength}")
+    import cv2
+    k = np.array([strength / 4, 1 - strength / 2, strength / 4], np.float32)
+    out = cv2.sepFilter2D(rgb16.astype(np.float32), -1, k, k, borderType=cv2.BORDER_REFLECT_101)
+    return np.clip(out + 0.5, 0, 65535).astype(np.uint16)
+
+
 def _ljpeg_cfa_tiles(data: np.ndarray, bits: int, tile: int = LJPEG_TILE, threads: int | None = None):
     """CFA tiles as lossless JPEG in the standard camera layout: 2 components
     at half width, so each component's left neighbour is the SAME colour (a
@@ -268,9 +291,10 @@ def _ljpeg_cfa_tiles(data: np.ndarray, bits: int, tile: int = LJPEG_TILE, thread
         yield from pool.map(encode, coords)
 
 
-def _cfa_payload(rgb16: np.ndarray, compression: str, bit_depth: int, threads: int | None = None):
+def _cfa_payload(rgb16: np.ndarray, compression: str, bit_depth: int, threads: int | None = None,
+                 olpf: float = 0.0):
     """-> (data, write kwargs, raw-IFD tags) for a CFA (Bayer) main image."""
-    mosaic = _rgb_to_mosaic(rgb16)
+    mosaic = _rgb_to_mosaic(olpf_prefilter(rgb16, olpf))
     h, w = mosaic.shape
     raw_tags = [
         (33421, "H", 2, (2, 2), False),                       # CFARepeatPatternDim
@@ -363,6 +387,7 @@ def write_linear_dng(
     bit_depth: int = 12,
     threads: int | None = None,
     layout: str = "linear",
+    cfa_olpf: float = 0.0,
     exif_fields: dict | None = None,
     write_preview: bool = True,
     preview_max_dim: int = 1024,
@@ -404,6 +429,10 @@ def write_linear_dng(
         the data: an 18 MP photo is ~18 MB at the default 12 bits vs ~50 MB.
         The re-mosaic round trip measured ~48 dB PSNR through libraw's
         AHD/DCB/PPG demosaics (generally invisible above ~40 dB).
+    cfa_olpf: layout "cfa" only -- strength of an emulated optical low-pass
+        (anti-aliasing) filter applied before Bayer sampling, 0 (default, off)
+        to 1. 0.5 halves false-colour moire on fine detail at the cost of
+        some sharpness. See olpf_prefilter().
     threads: worker threads for lossless-JPEG tile encoding. None (default) =
         all CPU cores; 1 = single-threaded. Output is byte-identical either way.
     exif_fields: output of exif_transfer.extract_exif() on the source
@@ -530,7 +559,7 @@ def write_linear_dng(
         # Single-channel Bayer mosaic. tifffile knows CFA (32803) and a
         # 1-sample image natively -- nothing to guess, so no post-write
         # fix-up; and its raw-IFD tags replace the 3-sample black/white ones.
-        main_data, cfa_kwargs, raw_extratags = _cfa_payload(rgb16, compression, bit_depth, threads)
+        main_data, cfa_kwargs, raw_extratags = _cfa_payload(rgb16, compression, bit_depth, threads, cfa_olpf)
         main_kwargs = dict(photometric=32803, description=description, software=f"OpenRAW {pipeline_version}",
                            metadata=None, subfiletype=0, extratags=ifd0_extratags + raw_extratags, **cfa_kwargs)
         finalize = False

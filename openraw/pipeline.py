@@ -47,6 +47,7 @@ class PipelineConfig:
     dng_bit_depth: int = 12  # 16 (bit-exact), 14, 12, 10
     encode_threads: int | None = None  # LJPEG tile-encoding threads; None = all cores
     dng_layout: str = "linear"  # or "cfa": Bayer mosaic, demosaiced by the raw editor
+    dng_cfa_olpf: float = 0.0  # "cfa" only: emulated anti-aliasing filter strength, 0 = off (try 0.5)
     preserve_exif: bool = True  # no GPS ever -- dropped entirely, see exif_transfer.py
     write_preview: bool = True  # small JPEG preview + SubIFD main image -- see dng_writer.py
     preview_max_dim: int = 1024
@@ -143,6 +144,7 @@ class OpenRawPipeline:
             bit_depth=cfg.dng_bit_depth,
             threads=cfg.encode_threads,
             layout=cfg.dng_layout,
+            cfa_olpf=cfg.dng_cfa_olpf,
             exif_fields=result.decoded.exif_fields if cfg.preserve_exif else None,
             write_preview=cfg.write_preview,
             preview_max_dim=cfg.preview_max_dim,

@@ -46,3 +46,19 @@ def test_gain_matching_removes_exposure_and_white_balance_only():
     assert np.allclose([m["gain_r"], m["gain_g"], m["gain_b"]], [2.0, 1 / 0.7, 1 / 0.9], rtol=1e-3)
     curved = np.power(ref, 0.8)  # a tone difference is not explained by gains
     assert rpe.metrics(ref, curved)["psnr_gain"] < 40
+
+
+def test_render_applies_the_cfa_dngs_default_crop(tmp_path):
+    """A CFA DNG carries a 4 px border for demosaicing, removed by DefaultCrop.
+    render() must apply it, or CFA renders are scored 4 px out of alignment."""
+    pytest.importorskip("rawpy")
+    from openraw.dng_writer import write_linear_dng
+    yy, xx = np.mgrid[0:300, 0:400].astype(np.float32)  # (libraw mis-renders very small CFA images)
+    img = np.repeat((np.sin(xx / 7) * np.cos(yy / 5))[..., None], 3, axis=2)
+    img = ((img * 0.4 + 0.5) * 30000).astype(np.uint16)  # smooth: a CFA round trip keeps it
+    lin, cfa = tmp_path / "l.dng", tmp_path / "c.dng"
+    write_linear_dng(str(lin), img, write_preview=False)
+    write_linear_dng(str(cfa), img, layout="cfa", write_preview=False)
+    a, b = rpe.render(lin), rpe.render(cfa)
+    assert a.shape == b.shape == (300, 400, 3)
+    assert np.abs(a - b)[4:-4, 4:-4].mean() < 0.01  # aligned: same pixels

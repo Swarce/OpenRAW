@@ -5,6 +5,12 @@ summarized; commit messages carry the full detail and measurements.
 
 ## [Unreleased] — 0.1.0.dev0
 
+### Fixed
+- `tools/raw_pair_eval.py` scored CFA DNGs 4 px out of alignment (LibRaw
+  reports the DefaultCrop that removes the CFA padding but doesn't apply it),
+  so CFA looked 0.9–2.3 dB worse than linear against the NEX-7 raws. Fixed:
+  CFA scores the same as linear. Results and comparison images regenerated.
+
 ### Changed
 - **Renamed to OpenRAW**: package `pseudoraw` → `openraw`, command
   `pseudoraw` → `openraw`, `PseudoRawPipeline` → `OpenRawPipeline`,
@@ -21,6 +27,10 @@ summarized; commit messages carry the full detail and measurements.
 - `openraw --version` reports key library versions for bug reports.
 
 ### Added — DNG output
+- **`--cfa-aa STRENGTH`** (with `--layout cfa`): emulates a camera's optical
+  low-pass (anti-aliasing) filter before the Bayer mosaic. At 0.5: about half
+  the false-colour moiré on fine detail, a closer demosaic round trip on real
+  photos (51.9 → 53.1 dB through AHD), ~15% less edge energy. Off by default.
 - **Lossless-JPEG DNG compression** (tiled, 3-component) with a DNG
   LinearizationTable at 12-bit by default: ~50 MB instead of ~108 MB for an
   18 MP photo. `--bit-depth 16/14/12/10`, `--compression none`.

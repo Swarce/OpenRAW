@@ -113,13 +113,13 @@ sharpest 2048×2048 px region.
 | Method | Layout | PSNR, gain-matched | gain-matched, display | PSNR as converted |
 |---|---|---|---|---|
 | classical | linear | 36.48 dB | 23.96 dB | 16.35 dB |
-| classical | CFA | 35.39 dB | 23.61 dB | 16.29 dB |
+| classical | CFA | 36.52 dB | 23.98 dB | 16.33 dB |
 | InvISP `openraw-fivek-e53-best` | linear | 38.95 dB | 28.55 dB | 29.68 dB |
-| InvISP `openraw-fivek-e53-best` | CFA | 37.30 dB | 27.78 dB | 29.32 dB |
-| InvISP `nikon.pth` (upstream) | linear | **40.32 dB** | **30.25 dB** | **32.48 dB** |
-| InvISP `nikon.pth` (upstream) | CFA | 38.25 dB | 29.16 dB | 31.88 dB |
+| InvISP `openraw-fivek-e53-best` | CFA | 38.97 dB | 28.56 dB | 29.70 dB |
+| InvISP `nikon.pth` (upstream) | linear | 40.32 dB | 30.25 dB | 32.48 dB |
+| InvISP `nikon.pth` (upstream) | CFA | **40.33 dB** | **30.25 dB** | **32.50 dB** |
 | InvISP `openraw-fivek-raise-e14-best` | linear | 39.42 dB | 29.34 dB | 31.64 dB |
-| InvISP `openraw-fivek-raise-e14-best` | CFA | 37.62 dB | 28.45 dB | 31.15 dB |
+| InvISP `openraw-fivek-raise-e14-best` | CFA | 39.44 dB | 29.35 dB | 31.67 dB |
 
 *Means over the four photos; per photo in
 [`examples/nex7_raw_pair_results.csv`](../examples/nex7_raw_pair_results.csv).*
@@ -140,9 +140,13 @@ sharpest 2048×2048 px region.
   `e53-best`), level on DSC00245, 0.5-1.6 dB behind on the others, and
   0.1-0.6 dB ahead of `e53-best` on every photo. Why a single-camera model
   transfers this well to the Sony isn't known yet.
-- **CFA costs 0.9–2.3 dB** against linear here: the editor's demosaic has to
-  rebuild detail the linear DNG stores directly. Still well ahead of the
-  classical path for InvISP.
+- **CFA costs nothing** here: a CFA DNG, demosaiced by the same converter
+  (AHD), scores within 0.05 dB of the linear one for every method and photo
+  (0.01-0.04 dB higher on average). The real raw went through a Bayer filter
+  and the same demosaic, so re-mosaicing doesn't take the result any further
+  from it. (Earlier versions of this table showed CFA 0.9-2.3 dB behind:
+  `raw_pair_eval` didn't apply the CFA DNG's 4 px DefaultCrop, so it scored
+  the CFA render 4 px out of alignment.)
 - Four photos, one camera, one session, similar subjects (flowers, close
   up): a first real measurement, not a benchmark.
 

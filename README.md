@@ -77,6 +77,9 @@ an 18 MP photo around **50 MB**:
 `--layout cfa` writes a **Bayer mosaic** instead, like a real camera raw:
 your editor runs its own demosaic, and the file is ~3x smaller (~18 MB).
 Best for photographs; keep linear for screenshots, logos and graphics.
+Against real raws it scores the same as linear. Add `--cfa-aa 0.5` to
+emulate a camera's anti-aliasing filter: about half the moiré on fine
+repeating detail (fabric, fences, screens), slightly softer.
 See [docs/dng-format.md](docs/dng-format.md) for measured quality.
 
 All of these are lossless-JPEG-compressed DNGs (the same compression real

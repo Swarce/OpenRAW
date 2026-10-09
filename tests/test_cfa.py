@@ -102,3 +102,49 @@ def test_cfa_quality_tool_runs(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "libraw AHD" in out and "PSNR dB" in out
     assert (tmp_path / "test_source_cfa_crops.png").exists()
+
+
+def _zone_plate(n=192):
+    """Fine grey concentric rings, ever finer towards the corner: the detail a
+    Bayer sensor without an anti-aliasing filter turns into coloured moire."""
+    yy, xx = np.mgrid[0:n, 0:n].astype(np.float32)
+    zp = 0.5 + 0.5 * np.cos(0.9 * np.pi * (xx ** 2 + yy ** 2) / (2 * n))
+    lin = np.where(zp <= 0.04045, zp / 12.92, ((zp + 0.055) / 1.055) ** 2.4)
+    return np.repeat((lin * 65535 + 0.5).astype(np.uint16)[..., None], 3, axis=2)
+
+
+def test_olpf_off_changes_nothing(tmp_path, rgb16):
+    from openraw.dng_writer import olpf_prefilter
+    assert olpf_prefilter(rgb16, 0) is rgb16
+    a, b = str(tmp_path / "a.dng"), str(tmp_path / "b.dng")
+    write_linear_dng(a, rgb16, layout="cfa", write_preview=False)
+    write_linear_dng(b, rgb16, layout="cfa", write_preview=False, cfa_olpf=0.0)
+    assert open(a, "rb").read() == open(b, "rb").read()
+    with pytest.raises(ValueError):
+        olpf_prefilter(rgb16, 1.5)
+
+
+def test_olpf_reduces_false_colour_on_fine_detail(tmp_path):
+    """The emulated anti-aliasing filter: much less false colour (chroma error
+    against the ideal, demosaic-free image, as displayed) on a zone plate
+    through AHD. Measured ~50% less at 192 px, ~70% at 256 px."""
+    img = _zone_plate()
+    lin = str(tmp_path / "l.dng")
+    write_linear_dng(lin, img, compression="none", write_preview=False)
+    ref = _libraw(lin).astype(np.float32) / 65535
+
+    def chroma_error(strength):
+        p = str(tmp_path / f"c{strength}.dng")
+        write_linear_dng(p, img, layout="cfa", write_preview=False, cfa_olpf=strength)
+        out = _libraw(p, rawpy.DemosaicAlgorithm.AHD).astype(np.float32) / 65535
+        enc = lambda x: np.power(np.clip(x, 0, 1), 1 / 2.2)  # noqa: E731
+        c = lambda x: enc(x) - enc(x).mean(axis=-1, keepdims=True)  # noqa: E731
+        return float(np.abs(c(out) - c(ref))[8:-8, 8:-8].mean())
+    off, on = chroma_error(0.0), chroma_error(0.5)
+    assert on < 0.7 * off, (off, on)
+
+
+def test_cli_rejects_cfa_aa_without_cfa_layout(tmp_path):
+    from openraw.cli import main
+    with pytest.raises(SystemExit):
+        main([os.path.join(ROOT, "examples", "test_source.jpg"), "-o", str(tmp_path), "--cfa-aa", "0.5"])

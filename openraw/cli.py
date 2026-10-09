@@ -76,6 +76,10 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--layout", choices=["linear", "cfa"], default="linear",
                    help="linear (default): demosaiced RGB, no demosaicing needed by readers. cfa: an RGGB "
                         "Bayer mosaic like a real camera raw -- your editor runs its own demosaic; ~1/3 the size.")
+    g.add_argument("--cfa-aa", type=float, default=0.0, metavar="STRENGTH",
+                   help="--layout cfa only: emulate a camera's anti-aliasing (optical low-pass) filter before "
+                        "the Bayer mosaic, 0 (default, off) to 1. 0.5 roughly halves moire / false colour on fine "
+                        "detail, slightly softer. Not for graphics or text.")
     g.add_argument("--no-exif", action="store_true",
                    help="don't carry camera metadata (Make/Model/lens/exposure...) into the DNG. GPS is never carried.")
     g.add_argument("--no-preview", action="store_true", help="skip the embedded JPEG preview")
@@ -126,6 +130,7 @@ def _config_from_args(a) -> PipelineConfig:
         dng_bit_depth=a.bit_depth,
         encode_threads=a.threads or None,
         dng_layout=a.layout,
+        dng_cfa_olpf=a.cfa_aa,
         preserve_exif=not a.no_exif,
         write_preview=not a.no_preview,
         preview_max_dim=a.preview_max_dim,
@@ -229,7 +234,12 @@ def main(argv: list[str] | None = None) -> int:
             and "-o" not in argv and "--output" not in argv:
         argv = [argv[0], "-o", argv[1]] + argv[2:]
 
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.cfa_aa and args.layout != "cfa":
+        parser.error("--cfa-aa only applies to --layout cfa")
+    if not 0 <= args.cfa_aa <= 1:
+        parser.error("--cfa-aa must be between 0 and 1")
     try:
         plan = plan_jobs(args.inputs, args.output, args.recursive)
     except ValueError as e:

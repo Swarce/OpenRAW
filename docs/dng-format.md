@@ -88,11 +88,38 @@ quality -- the source JPEG's precision is the limit there).
   --crops out/` prints PSNR / sharpness / colour error for every libraw
   demosaic (+ Adobe's reference renderer if `OPENRAW_DNG_VALIDATE` is set) and
   saves zoomed side-by-side crops of each photo's most detailed region.
-- **Known limit**: razor-sharp edges between saturated primaries get some
-  false colour (35 dB on a synthetic worst case) -- inherent to sampling one
-  colour per pixel; real cameras share it. A chroma low-pass prefilter
-  (emulating a sensor's OLPF) was tried and made both test images *worse*,
-  so it isn't used.
+- **Against a real raw** (Sony NEX-7 RAW+JPEG pairs, `tools/raw_pair_eval.py`,
+  see [invisp.md](invisp.md#against-a-real-raw-sony-nex-7)): CFA scores the
+  same as linear, within 0.05 dB for every method and photo. Which of the four
+  Bayer phases the mosaic uses made no measurable difference either (0.02 dB):
+  the camera's processing has erased any trace of its own sensor's mosaic.
+- **Known limit**: razor-sharp edges between saturated primaries, and fine
+  repeating detail near the pixel pitch, get false colour (moiré) -- inherent
+  to sampling one colour per pixel; real cameras share it, and most fight it
+  with an optical low-pass ("anti-aliasing") filter.
+- **`--cfa-aa STRENGTH`** emulates that filter before the mosaic is sampled:
+  a 4-dot birefringent OLPF, i.e. a separable `[s/4, 1-s/2, s/4]` blur. Off by
+  default. Measured at 0.5, through libraw's AHD:
+
+  | | off | `--cfa-aa 0.5` | `--cfa-aa 1` |
+  |---|---|---|---|
+  | false colour, fine grey zone plate (192 / 256 px) | 100% | 51% / 33% | — |
+  | real photo round trip vs linear (PSNR, NEX-7 DSC00244) | 51.9 dB | 53.1 dB | 52.7 dB |
+  | real photo edge energy vs linear (same) | 96% | 80% | 71% |
+  | vs the real NEX-7 raws (gain-matched, mean of 4) | 39.44 dB | 39.46 dB | 39.47 dB |
+  | text and flat graphics vs linear (display PSNR) | 28.6 dB | 25.1 dB | 22.9 dB |
+
+  So it halves moiré on fine neutral detail and makes real photos
+  demosaic *more* faithfully, at the cost of some crispness -- the trade
+  every AA-filtered camera makes. It does little for saturated
+  single-colour patterns (red on black stays hard), and it softens text and
+  graphics, which belong in the linear layout anyway.
+- **Tried and rejected** (same measurements): a chroma-only low-pass before
+  sampling (worse on every test), low-passing only red and blue (no help on
+  moiré: smart demosaics rebuild red/blue detail from green), and iteratively
+  pre-compensating the mosaic for a bilinear or Malvar demosaic (half the
+  false colour through that demosaic, but 1-3 dB worse through AHD/DCB --
+  the editor's demosaic is unknown, so tuning for one hurts the others).
 - **Padding**: the image is mirror-padded by 4 px and `DefaultCrop` removes it,
   so demosaicing has neighbours at the edges (Adobe warns below 2 px; 4 px
   measured edge quality level with the interior). libraw reports the crop to

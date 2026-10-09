@@ -122,6 +122,13 @@ def render(path) -> np.ndarray:
         out = r.postprocess(use_camera_wb=True, no_auto_bright=True, output_bps=16, gamma=(1, 1),
                             user_flip=0, output_color=rawpy.ColorSpace.sRGB,
                             demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD)
+        s = r.sizes
+    # LibRaw reports a DNG's DefaultCrop but postprocess() doesn't apply it. A CFA
+    # DNG carries a 4 px demosaicing border there; left in, it shifts the render
+    # by 4 px against the linear one and every CFA score came out ~1-2 dB low.
+    if s.crop_width and s.crop_height and (s.crop_width, s.crop_height) != (out.shape[1], out.shape[0]):
+        out = out[s.crop_top_margin:s.crop_top_margin + s.crop_height,
+                  s.crop_left_margin:s.crop_left_margin + s.crop_width]
     return out.astype(np.float32) / 65535.0
 
 
