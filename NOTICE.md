@@ -85,8 +85,10 @@ modified). Per upstream's own README: each checkpoint is camera-specific
 and shouldn't be expected to generalize to other cameras' JPEGs.
 
 `pretrained/openraw-fivek-e35-best.pth`,
-`pretrained/openraw-fivek-e46-latest.pth` and
-`pretrained/openraw-fivek-e53-best.pth` are **not** upstream's: they were
+`pretrained/openraw-fivek-e46-latest.pth`,
+`pretrained/openraw-fivek-e53-best.pth` and
+`pretrained/openraw-fivek-raise-e14-best.pth` (FiveK and RAISE, see below)
+are **not** upstream's: they were
 trained by OpenRAW with this repository's `train.py` (InvISP's architecture,
 vendored MIT code) on images from the MIT-Adobe FiveK dataset
 (Bychkovsky, Paris, Chan & Durand, CVPR 2011), whose images are licensed
@@ -172,8 +174,8 @@ hold image IDs only).
 
 ### RAISE
 
-Used by `data/raise_prepare.py`; none of the weights in `pretrained/` have
-been trained on it so far.
+Used by `data/raise_prepare.py`; `pretrained/openraw-fivek-raise-*.pth` were
+trained on it (together with FiveK).
 
 > Duc-Tien Dang-Nguyen, Cecilia Pasquini, Valentina Conotter, Giulia Boato.
 > **RAISE: A Raw Images Dataset for Digital Image Forensics.** ACM

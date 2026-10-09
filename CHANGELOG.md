@@ -74,6 +74,12 @@ summarized; commit messages carry the full detail and measurements.
 - Gradient checkpointing (`--checkpointing auto`, on below 12 GB): fits the
   8-block network on 6 GB GPUs, identical gradients.
 - `--time_limit_hours`: stop cleanly between epochs before a session limit.
+- **`openraw-fivek-raise-e14-best.pth`**: the FiveK + RAISE run's best so
+  far (from `e53-best`, ~1,930 images from 5 cameras, weight averaging).
+  Highest of all models on the shared held-out set (39.01 dB vs 38.55 for
+  `e53-best`, 37.48 for `nikon.pth`), and 39.42 dB on the Sony NEX-7 real-raw
+  test (`e53-best` 38.95, `nikon.pth` 40.32). Now the suggested checkpoint.
+  The model table in `docs/invisp.md` scores every model on the same test set.
 - **Ground truth against real raws** (`tools/raw_pair_eval.py`): converts
   the JPEG of RAW+JPEG pairs with every method and layout, renders each DNG
   and the camera's real raw with the same LibRaw settings, aligns them and

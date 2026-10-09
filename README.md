@@ -97,12 +97,13 @@ Run `openraw --help` for every option.
 network. Needs PyTorch: `pip install ".[invisp]"`.
 
 ```bash
-openraw photo.jpg --invisp-checkpoint pretrained/openraw-fivek-e53-best.pth
+openraw photo.jpg --invisp-checkpoint pretrained/openraw-fivek-raise-e14-best.pth
 ```
 
 `pretrained/` holds upstream's two single-camera models (`nikon.pth`,
 `canon.pth`) and OpenRAW's own, trained on many pooled MIT-Adobe FiveK
-cameras (`openraw-fivek-*.pth`, training still in progress). You can also
+cameras (`openraw-fivek-*.pth`) and on FiveK + RAISE (`openraw-fivek-raise-*.pth`,
+training still in progress). You can also
 train your own, locally or on Kaggle's free GPUs. What the models are and
 how they differ: [docs/invisp.md](docs/invisp.md).
 
