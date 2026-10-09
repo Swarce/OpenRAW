@@ -208,3 +208,23 @@ def test_amp_check_only_measures_without_training(kaggle, monkeypatch):
     assert kr.run(amp_check_only=True) == "amp checked"
     assert "train" not in calls
     assert calls[0][1].endswith("amp_check.py") and "--data_path" in calls[0]
+
+
+def test_data_is_found_deep_in_kaggles_newer_input_layout(kaggle):
+    kr.run(cameras="all", budget_gb=5)
+    deep = kaggle / "input" / "notebooks" / "someone" / "prep-notebook" / "output" / "v3"
+    import shutil
+    shutil.copytree(kaggle / "working" / kr.DATA_DIR, deep / kr.DATA_DIR)
+    assert kr.find_data_roots(kaggle / "input") == [deep / kr.DATA_DIR]  # 6 levels down
+    assert deep.parent.parent in kr.attached_inputs(kaggle / "input")
+
+
+def test_resuming_refuses_when_a_trained_camera_is_missing(kaggle, monkeypatch):
+    kr.run(cameras="all", budget_gb=5)
+    _publish_as_dataset(kaggle)
+    ck = kaggle / "input" / "prev" / "exps" / "t" / "checkpoint"; ck.mkdir(parents=True)
+    (ck / "latest.pth").write_bytes(b"x")
+    (ck.parent / "commandline_args.yaml").write_text('{"camera": ["Testco_T1", "Otherco_Z9", "RAISE_Nikon_D90"]}')
+    monkeypatch.setattr(kr, "train", lambda *a, **k: pytest.fail("must not train"))
+    with pytest.raises(SystemExit, match="RAISE_Nikon_D90"):
+        kr.run(task="t")

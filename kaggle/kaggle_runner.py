@@ -48,9 +48,15 @@ def log(*a):
 
 
 # --------------------------------------------------------------------- data
-def find_data_roots(root: Path = None, max_depth: int = 4) -> list[Path]:
+_SKIP_DIRS = {"RAW", "RGB", "exps", "checkpoint", "raw", "_metadata", "__pycache__"}
+
+
+def find_data_roots(root: Path = None, max_depth: int = 8) -> list[Path]:
     """Prepared-data roots under `root`: folders holding <Camera>_train.txt
-    next to a <Camera>/RAW/ folder of .npz pairs."""
+    next to a <Camera>/RAW/ folder of .npz pairs. Searched 8 levels deep:
+    Kaggle mounts inputs at varying depths (e.g. datasets/<user>/<name>/,
+    notebooks/<user>/<name>/), and a dataset made from a notebook's output
+    adds levels of its own."""
     root = Path(root or INPUT)
     found = []
     if not root.is_dir():
@@ -60,11 +66,50 @@ def find_data_roots(root: Path = None, max_depth: int = 4) -> list[Path]:
         if len(d.relative_to(root).parts) > max_depth:
             dirnames[:] = []
             continue
+        dirnames[:] = [n for n in dirnames if n not in _SKIP_DIRS]  # never walk thousands of pairs
         cams = [f[: -len("_train.txt")] for f in filenames if f.endswith("_train.txt")]
         if any((d / c / "RAW").is_dir() and any((d / c / "RAW").glob("*.npz")) for c in cams):
             found.append(d)
             dirnames[:] = []  # don't descend into a data root's camera folders
     return sorted(found)
+
+
+def _unused_data_dirs(root: Path, roots: list[Path], max_depth: int = 10) -> list[Path]:
+    """Folders named like prepared data (openraw-data) that weren't used --
+    reported, so a dataset that's attached but not found doesn't go unnoticed."""
+    out = []
+    for dirpath, dirnames, _ in os.walk(root):
+        d = Path(dirpath)
+        if len(d.relative_to(root).parts) > max_depth:
+            dirnames[:] = []
+            continue
+        dirnames[:] = [n for n in dirnames if n not in _SKIP_DIRS]
+        if d.name == DATA_DIR and d not in roots and not any(r in d.parents for r in roots):
+            out.append(d)
+    return out
+
+
+def attached_inputs(root: Path = None) -> list[Path]:
+    """Each attached input's folder: /kaggle/input/<name>, or in Kaggle's newer
+    layout /kaggle/input/{datasets,notebooks,...}/<owner>/<name>."""
+    root = Path(root or INPUT)
+    out = []
+    for top in sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []:
+        if top.name in ("datasets", "notebooks", "models", "competitions"):
+            out += sorted(q for owner in top.iterdir() if owner.is_dir() for q in owner.iterdir() if q.is_dir())
+        else:
+            out.append(top)
+    return out
+
+
+def trained_cameras(ckpt_dir: Path) -> list[str]:
+    """The cameras a run was trained on, from its commandline_args.yaml (next
+    to its checkpoint folder); [] if unknown."""
+    import json
+    try:
+        return list(json.loads((Path(ckpt_dir).parent / "commandline_args.yaml").read_text()).get("camera") or [])
+    except (OSError, ValueError):
+        return []
 
 
 def merge_data(roots: list[Path], dest: Path) -> list[str]:
@@ -413,6 +458,8 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     amp_check_only: don't train; measure whether mixed precision (--amp) is
     faster on this GPU and what it costs in accuracy (tools/amp_check.py)."""
     session_start = session_start or time.time()
+    for a in attached_inputs(INPUT):
+        log(f"input: {a}")
     if raise_csv:
         csv_path = find_raise_csv(INPUT) if raise_csv is True else Path(raise_csv)
         if not csv_path or not Path(csv_path).exists():
@@ -435,6 +482,8 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     shutil.rmtree(data_root, ignore_errors=True)
     cams = merge_data(roots, data_root)
     log(f"cameras: {', '.join(cams)}")
+    for d in _unused_data_dirs(INPUT, roots):
+        log(f"WARNING: {d} looks like prepared data but holds no usable camera folders -- not used")
     if compare_only:
         code = compare(task, data_root)
         return "compared" if code == 0 else f"comparison exited with code {code}"
@@ -443,6 +492,13 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
         return "amp checked" if code == 0 else f"amp check exited with code {code}"
     ck = find_checkpoint(task, INPUT)
     if ck:
+        missing = [c for c in trained_cameras(ck) if c not in cams]
+        if missing and not compare_only and not amp_check_only:
+            # resuming on part of the data silently changes what the run learns
+            # AND what its evaluation measures -- stop before spending GPU time
+            raise SystemExit(f"run {task!r} was trained on cameras that aren't in the attached data: "
+                             f"{', '.join(missing)}. Attach the dataset(s) with them (found only: "
+                             f"{', '.join(str(r) for r in roots)}).")
         restore_checkpoint(ck, WORKING / "exps", task)
         log(f"restored checkpoint from {ck}")
     elif init_from:
