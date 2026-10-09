@@ -242,4 +242,4 @@ def test_unrecognised_input_layout_is_printed_when_cameras_are_missing(kaggle, m
         kr.run(task="t")
     out = capsys.readouterr().out
     assert "input fivek-odd contains no prepared data" in out and "pairs.zip" in out
-    assert "input prev contains" not in out  # the checkpoint input isn't listed as data
+    assert "input prev contains no prepared data the runner recognises (it holds a run's output" in out

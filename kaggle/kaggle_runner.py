@@ -515,8 +515,9 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
         missing = [c for c in trained_cameras(ck) if c not in cams]
         if missing and not compare_only and not amp_check_only:
             for a in attached_inputs(INPUT):
-                if not any(r == a or a in r.parents for r in roots) and not (a / "exps").is_dir():
-                    log(f"input {a.name} contains no prepared data the runner recognises. Its layout:")
+                if not any(r == a or a in r.parents for r in roots):
+                    kind = " (it holds a run's output: exps/)" if (a / "exps").is_dir() else ""
+                    log(f"input {a.name} contains no prepared data the runner recognises{kind}. Its layout:")
                     for line in describe_tree(a):
                         log("   " + line)
                     log("   (expected: <Camera>_train.txt files next to <Camera>/RAW/*.npz folders, "
