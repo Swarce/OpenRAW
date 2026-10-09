@@ -218,6 +218,11 @@ def evaluate(net, loader, device):
     return float(np.mean(raw_p)), float(np.mean(rgb_p))
 
 
+def _amp_context(device_type, dtype):
+    """The reduced-precision region (a function so tests can swap it out)."""
+    return torch.autocast(device_type, dtype=dtype)
+
+
 def _enable_amp(net, device):
     """PATCHED (OpenRAW): mixed precision, applied where it's safe. Each
     InvBlock's coupling (y1 = x1 + F(x2); y2 = x2 * exp(s(y1)) + G(y1)) is
@@ -234,7 +239,7 @@ def _enable_amp(net, device):
         if isinstance(m, DenseBlock):
             f = m.forward
             def fwd(x, f=f):
-                with torch.autocast(device.type, dtype=dtype):
+                with _amp_context(device.type, dtype):
                     return f(x).float()
             m.forward = fwd
             n += 1
