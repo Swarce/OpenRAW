@@ -79,8 +79,11 @@ class OpenRawPipeline:
         self.config = config or PipelineConfig()
 
     def run(self, jpeg_path: str) -> PipelineResult:
+        return self.run_decoded(load_jpeg(jpeg_path))
+
+    def run_decoded(self, decoded: DecodedJpeg) -> PipelineResult:
+        """The pipeline from an already-decoded JPEG (e.g. a region of one)."""
         cfg = self.config
-        decoded = load_jpeg(jpeg_path)
         srgb_u8 = (decoded.rgb * 255.0 + 0.5).astype(np.uint8)
 
         if cfg.use_invisp:

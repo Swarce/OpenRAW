@@ -106,6 +106,13 @@ cameras (`openraw-fivek-*.pth`, training still in progress). You can also
 train your own, locally or on Kaggle's free GPUs. What the models are and
 how they differ: [docs/invisp.md](docs/invisp.md).
 
+Measured against real RAW+JPEG pairs from a Sony NEX-7 (a camera no model
+was trained on), InvISP comes much closer to the true raw than the
+classical path — about 39–40 dB vs 36.5 dB after matching exposure, 28–30 dB
+vs 24 dB as you'd see it ([details](docs/invisp.md#against-a-real-raw-sony-nex-7)):
+
+![Camera JPEG, real raw, and each OpenRAW method on a Sony NEX-7 photo](examples/nex7_DSC00246_compare.jpg)
+
 ## Tips
 
 - **Editors apply their own sharpening and noise reduction to raw files.**

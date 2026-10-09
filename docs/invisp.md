@@ -8,8 +8,9 @@ rendered sRGB. Full attribution in [NOTICE.md](../NOTICE.md).
 > **Status: experimental.** It runs end to end and is covered by tests.
 > Upstream ships two camera-specific models; you can train your own on any
 > FiveK cameras ([training.md](training.md)). Models are scored on FiveK's
-> held-out RAW files during training, but not yet against RAW+JPEG pairs from
-> other cameras. The classical path is the default for good reason.
+> held-out RAW files during training, and against real RAW+JPEG pairs from a
+> camera none of them was trained on ([below](#against-a-real-raw-sony-nex-7)):
+> there, InvISP comes much closer to the true raw than the classical path.
 
 ## Running it
 
@@ -54,8 +55,10 @@ What the differences mean in practice:
   It climbed until the last learning-rate drop (~epoch 49), then stayed
   around 38.5-39.1. Single snapshots at that stage jitter by several tenths
   of a dB, and some of that is likely mild overfitting to ~1,070 training
-  images. **`e53-best` is the best this run reached, and the one to use.**
-  `e35-best` and `e46-latest` are earlier snapshots, kept for comparison.
+  images. **`e53-best` is the best this run reached.** `e35-best` and
+  `e46-latest` are earlier snapshots, kept for comparison. (On real Sony
+  photos, though, upstream's `nikon.pth` scored higher still — see
+  [below](#against-a-real-raw-sony-nex-7).)
   The run was stopped at epoch 139 of 182; its successor trains on FiveK +
   RAISE, starting from `e53-best`, with weight averaging (see
   [training.md](training.md)).
@@ -85,21 +88,69 @@ upstream's training data didn't (see `data/README.md`), so their raw PSNR
 here includes that convention mismatch — the same one they face inside
 OpenRAW. ~1 minute per model on a GPU, several on a CPU.
 
-### On a real photo
+### Against a real raw: Sony NEX-7
 
-![Parrot crop: source JPEG, then the raw output of each model](../examples/invisp_models_compared.jpg)
+The real test of OpenRAW: shoot RAW + JPEG, convert the camera's JPEG, and
+compare with what the camera's own raw file contains. Four photos from a Sony
+NEX-7 (24 MP, by the project's author; a camera in no model's training data),
+measured with `tools/raw_pair_eval.py`: every DNG *and the real `.ARW`* is
+rendered by the same raw converter (LibRaw: camera white balance, no
+auto-brightening, linear sRGB), aligned, and compared on each photo's
+sharpest 2048×2048 px region.
 
-*A photo shot by the project's author on a Nikon Coolpix P520 (an 18 MP
-camera; this copy was downscaled to 5 MP), so neither of the upstream
-models' training cameras: the source JPEG, then each model's raw output, rendered without a
-tone curve.*
+| Method | Layout | PSNR, gain-matched | gain-matched, display | PSNR as converted |
+|---|---|---|---|---|
+| classical | linear | 36.48 dB | 23.96 dB | 16.35 dB |
+| classical | CFA | 35.39 dB | 23.61 dB | 16.29 dB |
+| InvISP `openraw-fivek-e53-best` | linear | 38.95 dB | 28.55 dB | 29.68 dB |
+| InvISP `openraw-fivek-e53-best` | CFA | 37.30 dB | 27.78 dB | 29.32 dB |
+| InvISP `nikon.pth` (upstream) | linear | **40.32 dB** | **30.25 dB** | **32.48 dB** |
+| InvISP `nikon.pth` (upstream) | CFA | 38.25 dB | 29.16 dB | 31.88 dB |
 
-The OpenRAW models land between the two upstream ones — `e35-best` is
-closest to `nikon.pth` — while `canon.pth` adds a visible magenta cast: the
-single-camera bias in action. All four look flatter than the JPEG; that's
-expected, since a raw has no tone curve or saturation boost until your editor
-applies one. Without a true raw for this photo, it shows how the models
-differ, not which one is right.
+*Means over the four photos; per photo in
+[`examples/nex7_raw_pair_results.csv`](../examples/nex7_raw_pair_results.csv).*
+
+- **Gain-matched** fits one gain per colour channel first, so exposure and
+  white balance (which a JPEG doesn't record) are taken out; what remains is
+  tone, colour and detail — the fairest single number. **Display** is the
+  same comparison after sRGB gamma, which weighs shadows and midtones as you
+  see them. **As converted** includes the exposure offset too.
+- **InvISP beats the classical path clearly**, on every photo: +1.6 to
+  +4.9 dB gain-matched, +2.9 to +7.3 dB in display terms. The classical path
+  only undoes the sRGB curve, so it keeps the camera's contrast and
+  saturation, and its brightness is far from the raw's (16 dB as converted).
+  InvISP undoes the rendering itself.
+- **Upstream's `nikon.pth` scored highest**, ahead of OpenRAW's pooled
+  `e53-best` on all four photos (by 0.1 to 2.2 dB, 1.4 dB on average), even
+  though it learned a single different camera. Why isn't known yet; the
+  FiveK + RAISE run will be measured the same way when it finishes.
+- **CFA costs 0.9–2.3 dB** against linear here: the editor's demosaic has to
+  rebuild detail the linear DNG stores directly. Still well ahead of the
+  classical path for InvISP.
+- Four photos, one camera, one session, similar subjects (flowers, close
+  up): a first real measurement, not a benchmark.
+
+![DSC00244: camera JPEG, real raw, and each method](../examples/nex7_DSC00244_compare.jpg)
+![DSC00245](../examples/nex7_DSC00245_compare.jpg)
+![DSC00246](../examples/nex7_DSC00246_compare.jpg)
+![DSC00247](../examples/nex7_DSC00247_compare.jpg)
+
+*Crops of each photo's most detailed area. Every raw-derived tile is rendered
+the same way and matched to the real raw's exposure; the JPEG is shown as
+the camera wrote it. Note how the raw is flatter and less saturated than the
+JPEG — it has no tone curve until an editor applies one — and how closely
+the InvISP outputs follow it, where the classical outputs keep the JPEG's
+look.*
+
+To measure your own camera: shoot RAW + JPEG and run
+
+```bash
+python tools/raw_pair_eval.py my_pairs/ --out results/ --crops --region 2048 \
+    --checkpoint pretrained/openraw-fivek-e53-best.pth --checkpoint pretrained/nikon.pth
+```
+
+(`--region 2048` keeps it to a few minutes per photo and model on a CPU;
+without it the whole frame is used.)
 
 Any checkpoint `train.py` writes also works with `--invisp-checkpoint`
 (`best.pth`, `latest.pth`, `NNNN.pth`, or the full-state `latest_state.pth`).

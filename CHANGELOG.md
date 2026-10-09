@@ -74,6 +74,13 @@ summarized; commit messages carry the full detail and measurements.
 - Gradient checkpointing (`--checkpointing auto`, on below 12 GB): fits the
   8-block network on 6 GB GPUs, identical gradients.
 - `--time_limit_hours`: stop cleanly between epochs before a session limit.
+- **Ground truth against real raws** (`tools/raw_pair_eval.py`): converts
+  the JPEG of RAW+JPEG pairs with every method and layout, renders each DNG
+  and the camera's real raw with the same LibRaw settings, aligns them and
+  measures PSNR (as converted, gain-matched, display). First results, four
+  Sony NEX-7 photos: InvISP 39–40 dB vs classical 36.5 dB gain-matched;
+  upstream `nikon.pth` ahead of `openraw-fivek-e53-best`. Comparison images
+  in `examples/` replace the earlier Coolpix parrot crop.
 - **`tools/compare_models.py`**: scores any set of checkpoints on exactly
   the held-out images, crops and metric of training's evaluation, with a
   per-camera breakdown, into `compare.md` / `compare.csv`. The Kaggle
