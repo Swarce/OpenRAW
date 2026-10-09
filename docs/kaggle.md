@@ -5,7 +5,7 @@ many 12-hour sessions as it takes, resuming automatically. One notebook, two
 modes picked from what's attached to it.
 
 Kaggle limits it's built around: **12 h per GPU session**, **~30 GPU hours per
-week** (TPU quota is separate, but InvISP isn't ported to TPUs), **20 GB** of saved output per run (other disk space is wiped).
+week** (TPU quota is separate, but TPUs aren't supported: an experimental TPU path was tried and removed after Kaggle's TPU VM didn't run the notebook), **20 GB** of saved output per run (other disk space is wiped).
 
 ## One-time setup
 
@@ -60,39 +60,6 @@ To compare without training (e.g. while a training session runs): in a copy
 of the notebook, attach the prepared dataset (and the training notebook's
 latest output, to include its `best.pth`), set `COMPARE_ONLY = True` and
 Accelerator **None**. On CPU it takes roughly 5-10 minutes per model.
-
-## TPU (experimental)
-
-Kaggle's TPU quota (20 h a week) is separate from the GPU one, so a TPU
-session is extra training time. Set Accelerator to **TPU VM** and leave
-`ACCELERATOR = "auto"` (or set `"tpu"`); everything else works as on GPUs.
-
-- Training runs through **PyTorch/XLA** on **every TPU core** (8 on Kaggle):
-  each core takes its own image per step and the gradients are averaged, as
-  on two GPUs, so a step trains on 8 images. Before training, a self-test
-  (`tools/tpu_selftest.py`) checks that the cores can exchange data; if it
-  fails, training uses one core, and a failed all-core run is retried on one
-  core from the last saved epoch.
-- The setup cell installs the PyTorch/XLA release matching the session's
-  PyTorch if Kaggle's image doesn't include one. If none matches, it says so.
-- Data loading gets more worker processes (TPU VMs have many CPU cores).
-- Matrix maths runs at `--tpu_precision high` (~14 bits, 3 passes) by
-  default; TPUs otherwise round float32 to bfloat16. `default` is faster,
-  `highest` full float32.
-- Checkpoints are ordinary CPU tensors: a TPU run's output resumes on GPUs and
-  vice versa, and its `best.pth` works with `openraw --invisp-checkpoint`.
-
-**What's verified:** the XLA training path (training, evaluation, weight
-averaging, saving, resuming, `--amp` in bfloat16) runs on one emulated XLA
-device, and its gradients match the CPU's to 0.04%. **Not yet verified:**
-anything on real TPU hardware, including the all-core gradient exchange and
-the speed. Watch the first session's log: `[INFO] TPU/XLA: replica 1 of 8`,
-the self-test result, and the epoch times.
-
-Note that 8 cores make the effective batch 8 images instead of 2, with 8x
-fewer steps per epoch: a different optimisation from the GPU runs. Treat a
-TPU run as its own `TASK` rather than alternating one run between GPUs and
-TPUs.
 
 ## Checking mixed precision
 

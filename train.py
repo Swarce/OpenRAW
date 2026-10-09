@@ -1,5 +1,5 @@
 import numpy as np
-import os, time, random, threading
+import os, time, random
 import argparse
 import json
 
@@ -85,9 +85,7 @@ if __name__ == "__main__":
     parser.add_argument("--start_epoch", type=int, default=None,
                         help="with --resume on a weights-only checkpoint (made before full-state "
                              "checkpoints existed): the epoch to continue from")
-    parser.add_argument("--device", default="cuda",
-                        help="'cuda' (default), 'cuda:1', ..., 'cpu' (slow; for testing), or 'xla' / 'tpu' "
-                             "(experimental: TPU via PyTorch/XLA; --gpus 0 = every core, 1 = one core)")
+    parser.add_argument("--device", default="cuda", help="'cuda' (default), 'cuda:1', ... or 'cpu' (slow; for testing)")
     parser.add_argument("--gpus", type=int, default=1,
                         help="GPUs to train on in parallel (each takes a different image per step, gradients are "
                              "averaged: effective batch = gpus x batch_size). 0 = all available. --workers is "
@@ -106,10 +104,6 @@ if __name__ == "__main__":
                              "than any single step's. 0 = off.")
     parser.add_argument("--eval_images", type=int, default=40, help="max test images per evaluation (spread across cameras)")
     parser.add_argument("--eval_crop", type=int, default=512, help="centre crop size for evaluation")
-    parser.add_argument("--tpu_precision", choices=["default", "high", "highest"], default="high",
-                        help="TPU (--device xla) precision of float32 convolutions/matmuls: 'default' rounds "
-                             "to bfloat16 (fastest), 'high' (default) ~14 bits in 3 passes, 'highest' full "
-                             "float32 (slowest)")
     parser.add_argument("--amp", action="store_true",
                         help="mixed precision (experimental): the dense sub-networks, where nearly all the compute "
                              "is, run in float16 on CUDA (bfloat16 on CPU); the invertible coupling, the JPEG "
@@ -145,8 +139,6 @@ if __name__ == "__main__":
     # form, or where CUDA isn't available at all. Same behavior when it
     # works, a clear error instead of a cryptic one when it can't -- see
     # docs/training.md for what this means on your actual machine.
-    if args.device == "tpu" or args.device.startswith("xla"):
-        args.device = "xla"  # TPU (or any PyTorch/XLA device): see launch()
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         # Diagnose WHY, instead of just "no GPU" -- the usual cause on Windows
         # and macOS is a CPU-only PyTorch build, which `pip install torch` from
@@ -176,7 +168,7 @@ if __name__ == "__main__":
     # fails on Windows (no grep/rm) and can be ignored once CUDA is initialized.
     # Now: ask nvidia-smi for free memory directly (any OS) and select the GPU
     # by device index. Only when --device is plain "cuda" and there are 2+ GPUs.
-    if args.gpus == 0 and not _is_xla(args):  # with --device xla, 0 = every TPU core (see launch())
+    if args.gpus == 0:
         args.gpus = max(1, torch.cuda.device_count()) if args.device.startswith("cuda") else 1
     if args.gpus > 1 and args.device.startswith("cuda") and torch.cuda.device_count() < args.gpus:
         raise SystemExit(f"--gpus {args.gpus}: only {torch.cuda.device_count()} GPU(s) visible")
@@ -268,62 +260,10 @@ def _enable_checkpointing(net):
         op.forward = (lambda f: lambda x, rev=False: checkpoint(f, x, rev, use_reentrant=False))(f)
 
 
-def _is_xla(args) -> bool:
-    return str(getattr(args, "device", "")).startswith("xla")
-
-
-def _xla_device():
-    import torch_xla
-    if hasattr(torch_xla, "device"):
-        return torch_xla.device()
-    import torch_xla.core.xla_model as xm
-    return xm.xla_device()
-
-
-def _xla_sync():
-    """Execute the pending graph (torch_xla.sync in newer PyTorch/XLA, xm.mark_step before)."""
-    import torch_xla
-    if hasattr(torch_xla, "sync"):
-        torch_xla.sync()
-    else:
-        import torch_xla.core.xla_model as xm
-        xm.mark_step()
-
-
-_THREAD = threading.local()
-
-
-def _rank0_print_only():
-    """Silence print() outside rank 0 -- per THREAD: on TPU v2/v3 PyTorch/XLA
-    runs two cores as two threads of one process, so swapping print for a
-    no-op in one of them (as the GPU path does per process) would silence both."""
-    import builtins
-    if getattr(builtins.print, "_openraw_rank0", False):
-        return
-    orig = builtins.print
-    def rank0_print(*a, **k):
-        if getattr(_THREAD, "rank", 0) == 0:
-            orig(*a, **k)
-    rank0_print._openraw_rank0 = True
-    builtins.print = rank0_print
-
-
-def _to_cpu(obj):
-    """A copy of a (nested) state dict with every tensor on the CPU: saves are
-    then readable anywhere, and TPU tensors can't be pickled directly."""
-    if torch.is_tensor(obj):
-        return obj.detach().cpu()
-    if isinstance(obj, dict):
-        return {k: _to_cpu(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return type(obj)(_to_cpu(v) for v in obj)
-    return obj
-
-
 def _save(obj, path):
     """Write-then-rename: an interrupted save never leaves a corrupt checkpoint."""
     tmp = path + ".tmp"
-    torch.save(_to_cpu(obj), tmp)
+    torch.save(obj, tmp)
     os.replace(tmp, path)
 
 
@@ -369,18 +309,13 @@ class _EMA:
         return self.avg
 
 
-def _average_gradients(params, world, xla=False):
+def _average_gradients(params, world):
     """PATCHED (OpenRAW): multi-GPU data parallelism by hand. Each process ran
     forward + inverse + backward on its own image; average the gradients so
     every process takes the identical optimizer step. Not DDP: InvISP runs the
     SAME network twice (forward, then inverse) before one backward, which DDP's
     once-per-backward gradient hooks aren't designed around. One all-reduce of
-    all gradients flattened (~1.4M floats, ~6 MB): a few ms per step.
-    On TPU (xla=True) the same, with PyTorch/XLA's all-reduce."""
-    if xla:
-        import torch_xla.core.xla_model as xm
-        xm.all_reduce(xm.REDUCE_SUM, [p.grad for p in params if p.grad is not None], scale=1.0 / world)
-        return
+    all gradients flattened (~1.4M floats, ~6 MB): a few ms per step."""
     import torch.distributed as dist
     grads = [p.grad if p.grad is not None else torch.zeros_like(p) for p in params]
     flat = torch.cat([g.reshape(-1) for g in grads])
@@ -416,31 +351,8 @@ def _worker(rank, world, args, port):
         dist.destroy_process_group()
 
 
-def _worker_xla(index, args):
-    """One replica per TPU core (spawned by launch() through PyTorch/XLA, which
-    runs them as processes -- or, on TPU v2/v3, two threads per process)."""
-    import torch_xla.runtime as xr
-    _THREAD.rank = xr.global_ordinal()
-    _rank0_print_only()
-    main(args, rank=xr.global_ordinal(), world=xr.world_size())
-
-
 def launch(args):
     """Train on args.gpus processes (1 = plain single-process training)."""
-    if _is_xla(args):
-        # EXPERIMENTAL (OpenRAW): TPU via PyTorch/XLA. It decides how many
-        # replicas there are -- every core (8 on Kaggle's TPU VMs) or exactly 1;
-        # set TPU_NUM_DEVICES to limit it. Each core takes its own image per
-        # step and the gradients are averaged, as on several GPUs.
-        import torch_xla.distributed.xla_multiprocessing as xmp
-        n = getattr(args, "gpus", 0)
-        if n not in (0, 1):
-            raise SystemExit("--device xla: --gpus 0 (every TPU core) or --gpus 1 (one core); "
-                             "set TPU_NUM_DEVICES to use fewer cores")
-        print(f"[INFO] TPU/XLA (experimental): {'every core' if n == 0 else 'one core'}, one image per core "
-              f"per step", flush=True)
-        xmp.spawn(_worker_xla, args=(args,), nprocs=1 if n == 1 else None)
-        return
     world = getattr(args, "gpus", 1) or 1
     if world == 1:
         return main(args)
@@ -458,21 +370,7 @@ def launch(args):
 def main(args, rank=0, world=1):
     # PATCHED (OpenRAW, not upstream) throughout: device-agnostic, parallel
     # data loading, full-state checkpoints + exact resume, honest timing.
-    xla = _is_xla(args)
-    if xla:
-        import torch_xla
-        import torch_xla.core.xla_model as xm
-        device = torch_xla.device() if hasattr(torch_xla, "device") else xm.xla_device()
-        prec = getattr(args, "tpu_precision", "high")
-        try:
-            import torch_xla.backends
-            torch_xla.backends.set_mat_mul_precision(prec)
-        except (ImportError, AttributeError):  # older PyTorch/XLA: its default precision
-            prec += " (not settable in this PyTorch/XLA; its default applies)"
-        print(f"[INFO] TPU/XLA: replica {rank + 1} of {world}, device {device}, matmul precision {prec}")
-    else:
-        device = torch.device(args.device)
-    load_dev = "cpu" if xla else device  # checkpoints load to the CPU first on TPU
+    device = torch.device(args.device)
     ckpt = args.out_path + "%s/checkpoint/" % args.task
     os.makedirs(ckpt, exist_ok=True)
     # ======================================define the model======================================
@@ -480,9 +378,7 @@ def main(args, rank=0, world=1):
     jpeg = DiffJPEG if isinstance(DiffJPEG, torch.nn.Module) else DiffJPEG(differentiable=True, quality=90)
     jpeg = jpeg.to(device)
     gpu_gb = torch.cuda.get_device_properties(device).total_memory / 2**30 if device.type == "cuda" else None
-    # auto: on for small GPUs and CPU; off on TPU (16 GB of memory per core)
-    use_ckpt = {"on": True, "off": False}.get(getattr(args, "checkpointing", "auto"),
-                                             (not xla) and (gpu_gb is None or gpu_gb < 12))
+    use_ckpt = {"on": True, "off": False}.get(getattr(args, "checkpointing", "auto"), gpu_gb is None or gpu_gb < 12)
     use_amp = bool(getattr(args, "amp", False))
     if use_amp:
         n_sub = _enable_amp(net, device)
@@ -506,7 +402,7 @@ def main(args, rank=0, world=1):
 
     if args.resume:
         if os.path.exists(ckpt + "latest_state.pth"):
-            st = _load(ckpt + "latest_state.pth", load_dev)
+            st = _load(ckpt + "latest_state.pth", device)
             net.load_state_dict(st["net"])
             optimizer.load_state_dict(st["optimizer"])
             scheduler.load_state_dict(st["scheduler"])
@@ -514,7 +410,7 @@ def main(args, rank=0, world=1):
             print(f"[INFO] resumed from {ckpt}latest_state.pth: continuing at epoch {start_epoch}, step {step}")
         elif os.path.exists(ckpt + "latest.pth"):
             # weights-only checkpoint (upstream format / runs started before full-state saves)
-            net.load_state_dict(_load(ckpt + "latest.pth", load_dev))
+            net.load_state_dict(_load(ckpt + "latest.pth", device))
             start_epoch = args.start_epoch or 0
             for _ in range(start_epoch):  # fast-forward the LR schedule to where training was
                 scheduler.step()
@@ -525,9 +421,7 @@ def main(args, rank=0, world=1):
         else:
             raise SystemExit(f"--resume: no checkpoint in {ckpt}")
 
-    if world > 1 and xla:
-        xm.broadcast_master_param(net)  # every core starts from core 0's weights
-    elif world > 1:
+    if world > 1:
         # every process must start from identical weights (also after resume)
         import torch.distributed as dist
         for t in net.state_dict().values():
@@ -535,7 +429,7 @@ def main(args, rank=0, world=1):
 
     ema, eval_net = None, net
     if rank == 0 and getattr(args, "ema", 0) and args.ema > 0:
-        st = _load(ckpt + "latest_state.pth", load_dev) if args.resume and os.path.exists(ckpt + "latest_state.pth") else {}
+        st = _load(ckpt + "latest_state.pth", device) if args.resume and os.path.exists(ckpt + "latest_state.pth") else {}
         ema = _EMA(net, args.ema, st.get("ema"), st.get("ema_updates", 0))
         # evaluated in a separate network built from scratch -- not a deepcopy of
         # `net`, whose checkpointed forward closures would still point at `net`
@@ -595,7 +489,7 @@ def main(args, rank=0, world=1):
         else:
             print("[INFO] evaluation: no test images found -- skipped")
     if args.resume and os.path.exists(ckpt + "latest_state.pth"):
-        best_raw = _load(ckpt + "latest_state.pth", load_dev).get("best_raw_psnr", -1.0)
+        best_raw = _load(ckpt + "latest_state.pth", device).get("best_raw_psnr", -1.0)
 
     print("[INFO] Start to train")
     run_start, epochs_done, start_step = time.time(), 0, step
@@ -611,11 +505,7 @@ def main(args, rank=0, world=1):
         # line is printed, so steps between log lines don't wait on a GPU sync
         win = torch.zeros(3, device=device); win_n = 0; win_data = win_compute = 0.0
         ep_sum = torch.zeros(3, device=device); ep_n = 0
-        batches = dataloader
-        if xla:  # copies each batch to the TPU in the background, while the previous step runs
-            import torch_xla.distributed.parallel_loader as pl
-            batches = pl.MpDeviceLoader(dataloader, device)
-        for i_batch, sample_batched in enumerate(batches):
+        for i_batch, sample_batched in enumerate(dataloader):
             data_time = time.time() - data_t0  # waiting for the loader -- upstream didn't count this
             step_time = time.time()
 
@@ -637,13 +527,11 @@ def main(args, rank=0, world=1):
             if world > 1:
                 # averaged before the scaler looks at them: an overflow on any
                 # process becomes inf on every process, so all skip the same steps
-                _average_gradients(params, world, xla)
+                _average_gradients(params, world)
             scaler.step(optimizer)
             scaler.update()
             if ema is not None:
                 ema.update()
-            if xla:
-                _xla_sync()  # run this step's graph on the TPU
 
             losses = torch.stack([loss.detach(), raw_loss.detach(), rgb_loss.detach()])
             win += losses; ep_sum += losses; win_n += 1; ep_n += 1
@@ -668,7 +556,7 @@ def main(args, rank=0, world=1):
 
         scheduler.step()
         if rank != 0:  # rank 0 evaluates, saves and decides whether to stop
-            if world > 1 and _stop_flag(False, rank, xla):
+            if world > 1 and _stop_flag(False, rank):
                 break
             continue
         if eval_loader is not None and ((epoch + 1) % eval_every == 0 or epoch == args.epochs - 1):
@@ -723,19 +611,13 @@ def main(args, rank=0, world=1):
         # with several GPUs, every process must stop at the same epoch -- one
         # quitting alone would leave the others waiting forever in all_reduce
         if world > 1:
-            stop = _stop_flag(stop, rank, xla)
+            stop = _stop_flag(stop, rank)
         if stop:
             break
 
 
-def _stop_flag(stop, rank, xla=False):
+def _stop_flag(stop, rank):
     """Rank 0's stop decision, broadcast to every process."""
-    if xla:
-        import torch_xla.core.xla_model as xm
-        t = torch.tensor([1.0 if (stop and rank == 0) else 0.0], device=_xla_device())
-        t = xm.all_reduce(xm.REDUCE_MAX, t)
-        _xla_sync()
-        return bool(t.item() > 0)
     import torch.distributed as dist
     dev = torch.device("cuda", torch.cuda.current_device()) if dist.get_backend() == "nccl" else torch.device("cpu")
     t = torch.tensor([1 if stop else 0], device=dev)
