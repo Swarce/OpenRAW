@@ -79,6 +79,9 @@ summarized; commit messages carry the full detail and measurements.
   notebook runs it after every training session, or alone with
   `COMPARE_ONLY = True`. `train.py`'s camera resolution and test-image
   selection are shared functions now, so the two can't drift apart.
+- Kaggle: `INIT_FROM` starts a new `TASK` from another run's `best.pth`
+  (e.g. a bigger dataset continuing from the FiveK-only model), with its own
+  schedule, test set and best score.
 - `--invisp-checkpoint` on a full-state `latest_state.pth` uses its weight
   average when it has one.
 - **Weight averaging (`--ema`, default 0.999)**: evaluation and the saved

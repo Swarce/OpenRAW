@@ -175,3 +175,25 @@ def test_compare_only_scores_models_without_training(kaggle, monkeypatch):
     assert not called
     md = (kaggle / "working" / "compare" / "compare.md").read_text()
     assert "nikon.pth" in md and "canon.pth" in md and "openraw-fivek-e35-best.pth" in md
+
+
+def test_new_task_starts_from_another_runs_best_weights(kaggle, monkeypatch):
+    import torch
+    kr.run(cameras="all", budget_gb=5)
+    _publish_as_dataset(kaggle)
+    old = kaggle / "input" / "prev-output" / "exps" / "old-run" / "checkpoint"; old.mkdir(parents=True)
+    torch.save({"w": torch.ones(1)}, old / "best.pth")
+    torch.save({"w": torch.zeros(1)}, old / "latest.pth")
+    seen = {}
+    def fake_train(task, data_root, **kw):
+        ck = kaggle / "working" / "exps" / task / "checkpoint"
+        seen["files"] = sorted(p.name for p in ck.iterdir())
+        seen["w"] = torch.load(ck / "latest.pth")["w"].item()
+        return 0
+    monkeypatch.setattr(kr, "train", fake_train)
+    monkeypatch.setattr(kr, "compare", lambda *a, **k: 0)
+    monkeypatch.setattr(kr, "write_status", lambda *a, **k: "")
+    kr.run(task="new-run", init_from="old-run")
+    assert seen == {"files": ["latest.pth"], "w": 1.0}  # best.pth copied as a weights-only start, no state
+    with pytest.raises(SystemExit, match="no checkpoint found"):
+        kr.run(task="other-run", init_from="missing-run")

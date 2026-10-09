@@ -83,7 +83,18 @@ dataset:
 
 Attach it when starting a **new** `TASK`, not in the middle of a run: more
 data changes the test set (so raw PSNR is no longer comparable with earlier
-evaluations) and the automatic epoch count.
+evaluations) and the automatic epoch count — a finished or advanced run can
+even end up past the new total and not train at all.
+
+**Starting the new run from the old one's weights**: set `TASK` to a new
+name and `INIT_FROM` to the old run's name (e.g. `TASK = "openraw-fivek-raise"`,
+`INIT_FROM = "openraw-fivek"`), and attach the old run's latest output next
+to the datasets. The first session copies its `best.pth` in and trains from
+there at epoch 0, with its own learning-rate schedule, test set, best score
+and `eval.csv`. Later sessions resume the new run as usual (attach the new
+run's own output from then on; `INIT_FROM` is ignored once the new run has a
+checkpoint). Since it isn't starting from scratch, fewer epochs than the
+automatic count are usually enough; set `EPOCHS` if you want to cap it.
 
 ## What to expect
 

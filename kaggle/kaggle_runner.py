@@ -121,6 +121,28 @@ def find_checkpoint(task: str, root: Path = None) -> Path | None:
     return max(hits)[2] if hits else None
 
 
+def start_from(init_from: str, out_path: Path, task: str, root: Path = None) -> Path | None:
+    """Start `task` from another run's weights: copy that run's best.pth (else
+    latest.pth) from the attached inputs -- init_from is its TASK name, or a
+    path to a .pth -- to <out_path>/<task>/checkpoint/latest.pth. train.py's
+    --resume then loads it as a weights-only checkpoint: epoch 0, a fresh
+    optimizer, LR schedule, test set and best score. Returns the source file."""
+    root = Path(root or INPUT)
+    src = Path(init_from) if str(init_from).endswith(".pth") else None
+    if src is None:
+        for name in ("best.pth", "latest.pth"):
+            hits = sorted(root.rglob(f"exps/{init_from}/checkpoint/{name}"), key=lambda p: p.stat().st_mtime)
+            if hits:
+                src = hits[-1]
+                break
+    if src is None or not src.is_file():
+        return None
+    dst = Path(out_path) / task / "checkpoint"
+    dst.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst / "latest.pth")
+    return src
+
+
 def restore_checkpoint(ckpt_dir: Path, out_path: Path, task: str) -> Path:
     """Copy the previous session's checkpoints + eval.csv into the writable
     output folder, where train.py --resume looks for them."""
@@ -368,11 +390,14 @@ def write_status(task: str, epochs: int) -> str:
 
 # ---------------------------------------------------------------------- main
 def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, session_start=None,
-        extra_train_args=None, gpus=0, raise_csv=None, raise_cameras=(), raise_start=0, compare_only=False):
+        extra_train_args=None, gpus=0, raise_csv=None, raise_cameras=(), raise_start=0, compare_only=False,
+        init_from=None):
     """raise_csv: prepare RAISE instead of FiveK or training -- a path, or True
     to use the CSV with a NEF column among the attached inputs.
     compare_only: don't train; score the checkpoints on the held-out test
-    images (needs the prepared data attached; works on CPU)."""
+    images (needs the prepared data attached; works on CPU).
+    init_from: when `task` has no checkpoint yet, start it from another run's
+    weights -- that run's TASK name (its output attached) or a .pth path."""
     session_start = session_start or time.time()
     if raise_csv:
         csv_path = find_raise_csv(INPUT) if raise_csv is True else Path(raise_csv)
@@ -403,6 +428,12 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     if ck:
         restore_checkpoint(ck, WORKING / "exps", task)
         log(f"restored checkpoint from {ck}")
+    elif init_from:
+        src = start_from(init_from, WORKING / "exps", task)
+        if src is None:
+            raise SystemExit(f"INIT_FROM = {init_from!r}: no checkpoint found. Attach that run's output "
+                             f"(it contains exps/{init_from}/checkpoint/best.pth), or give a .pth path.")
+        log(f"new run {task!r} starting from the weights in {src}")
     n = count_train_pairs(data_root)
     epochs = epochs or suggest_epochs(n)
     code = train(task, data_root, epochs=epochs, workers=workers, session_start=session_start,
