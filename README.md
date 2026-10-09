@@ -97,7 +97,7 @@ Run `openraw --help` for every option.
 network. Needs PyTorch: `pip install ".[invisp]"`.
 
 ```bash
-openraw photo.jpg --invisp-checkpoint pretrained/openraw-fivek-e46-latest.pth
+openraw photo.jpg --invisp-checkpoint pretrained/openraw-fivek-e53-best.pth
 ```
 
 `pretrained/` holds upstream's two single-camera models (`nikon.pth`,

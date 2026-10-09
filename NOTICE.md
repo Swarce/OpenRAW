@@ -84,8 +84,9 @@ md5 against a fresh clone of the upstream repo — not retrained or
 modified). Per upstream's own README: each checkpoint is camera-specific
 and shouldn't be expected to generalize to other cameras' JPEGs.
 
-`pretrained/openraw-fivek-e35-best.pth` and
-`pretrained/openraw-fivek-e46-latest.pth` are **not** upstream's: they were
+`pretrained/openraw-fivek-e35-best.pth`,
+`pretrained/openraw-fivek-e46-latest.pth` and
+`pretrained/openraw-fivek-e53-best.pth` are **not** upstream's: they were
 trained by OpenRAW with this repository's `train.py` (InvISP's architecture,
 vendored MIT code) on images from the MIT-Adobe FiveK dataset
 (Bychkovsky, Paris, Chan & Durand, CVPR 2011), whose images are licensed

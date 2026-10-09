@@ -40,8 +40,9 @@ summarized; commit messages carry the full detail and measurements.
 - Optional InvISP (CVPR 2021) learned path, `--invisp`, with vendored
   upstream code and official checkpoints.
 - **OpenRAW-trained models** in `pretrained/`: `openraw-fivek-e35-best.pth`
-  (held-out raw PSNR 39.08 dB) and `openraw-fivek-e46-latest.pth`, snapshots
-  of a pooled-FiveK training run still in progress. Upstream's `nikon.pth` /
+  (held-out raw PSNR 39.08 dB), `openraw-fivek-e46-latest.pth` and
+  `openraw-fivek-e53-best.pth` (39.47 dB, the run's best), snapshots
+  of the first pooled-FiveK training run (stopped at epoch 139 of 182, past its plateau). Upstream's `nikon.pth` /
   `canon.pth` stay alongside.
 - **`--invisp-checkpoint PATH`**: use a model you trained (`best.pth`,
   `latest.pth`, or the full-state `latest_state.pth`).

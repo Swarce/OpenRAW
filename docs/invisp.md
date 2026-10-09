@@ -16,7 +16,7 @@ rendered sRGB. Full attribution in [NOTICE.md](../NOTICE.md).
 ```bash
 pip install ".[invisp]"     # adds PyTorch
 
-openraw photo.jpg --invisp-checkpoint pretrained/openraw-fivek-e46-latest.pth
+openraw photo.jpg --invisp-checkpoint pretrained/openraw-fivek-e53-best.pth
 openraw photo.jpg --invisp --invisp-camera NIKON_D700     # upstream model (or Canon_EOS_5D)
 ```
 
@@ -31,8 +31,9 @@ Weights aren't part of the installed package — see licensing below.
 | `canon.pth` | InvISP authors | Canon EOS 5D only (650 images) | 300 epochs, batch 1 | not yet measured |
 | `openraw-fivek-e35-best.pth` | OpenRAW | pooled FiveK cameras (~1,070 images) | epoch 35 of 182, batch 1 | **39.08 dB** |
 | `openraw-fivek-e46-latest.pth` | OpenRAW | same | epoch 46 of 182, batch 1 | not yet measured |
+| `openraw-fivek-e53-best.pth` | OpenRAW | same | epoch 53 of 182, batch 1, then 2 (two GPUs) from epoch 47 | **39.47 dB** |
 
-All four are trained on MIT-Adobe FiveK images, which are licensed for
+All five are trained on MIT-Adobe FiveK images, which are licensed for
 research only, so the weights are offered for **non-commercial research
 use** (the code is MIT). Citations and terms: [NOTICE.md](../NOTICE.md#training-data).
 
@@ -43,13 +44,21 @@ What the differences mean in practice:
   ideal for a D700 or 5D JPEG, a guess for anything else. The OpenRAW models
   learned from many FiveK cameras at once, an average rendering that's a more
   reasonable default when a JPEG's source camera is unknown.
-- **`e35-best` vs `e46-latest`** are snapshots of the same, still-running
-  training. `e35-best` is the best model the held-out evaluation has scored
-  (raw PSNR 39.08 dB, up from 36.14 at epoch 17). `e46-latest` has trained 11
-  epochs more — including after a learning-rate drop at epoch 30 — and the
-  scores were still rising, so it is probably better, but it hasn't been
-  evaluated yet. Prefer `e46-latest` for trying things; `e35-best` is the one
-  with a measured number behind it.
+- **The OpenRAW files are snapshots of one FiveK run.** Held-out raw PSNR
+  over that run:
+
+  | Epoch | 17 | 35 | 53 | 71 | 89 | 107 | 125 |
+  |---|---|---|---|---|---|---|---|
+  | raw PSNR (dB) | 36.14 | 39.08 | **39.47** | 38.80 | 38.51 | 39.14 | 38.77 |
+
+  It climbed until the last learning-rate drop (~epoch 49), then stayed
+  around 38.5-39.1. Single snapshots at that stage jitter by several tenths
+  of a dB, and some of that is likely mild overfitting to ~1,070 training
+  images. **`e53-best` is the best this run reached, and the one to use.**
+  `e35-best` and `e46-latest` are earlier snapshots, kept for comparison.
+  The run was stopped at epoch 139 of 182; its successor trains on FiveK +
+  RAISE, starting from `e53-best`, with weight averaging (see
+  [training.md](training.md)).
 - **Comparability.** "Held-out raw PSNR" is OpenRAW's own evaluation (real
   FiveK JPEG → inverse network → compared with the true raw, on 512 px centre
   crops of the test split). The upstream models haven't been scored on it
@@ -57,7 +66,7 @@ What the differences mean in practice:
   `tools/compare_models.py` (below) does exactly that, and the Kaggle notebook
   runs it at the end of every session. Upstream's paper numbers use a
   different setup and aren't comparable either.
-- Training continues; these files will be replaced by later snapshots, then a
+- Training continues; these files will be joined by later models, then a
   final model.
 
 ### Comparing models yourself
