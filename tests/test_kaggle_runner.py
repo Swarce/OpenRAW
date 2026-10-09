@@ -178,7 +178,7 @@ def test_compare_only_scores_models_without_training(kaggle, monkeypatch):
 
 
 def test_new_task_starts_from_another_runs_best_weights(kaggle, monkeypatch):
-    import torch
+    torch = pytest.importorskip("torch")
     kr.run(cameras="all", budget_gb=5)
     _publish_as_dataset(kaggle)
     old = kaggle / "input" / "prev-output" / "exps" / "old-run" / "checkpoint"; old.mkdir(parents=True)
