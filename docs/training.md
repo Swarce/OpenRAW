@@ -189,6 +189,17 @@ keeps both, so `--resume` continues the average. Runs saved before this
 existed resume too: the average starts from the current weights. `--ema 0`
 turns it off.
 
+**Mixed precision (`--amp`, experimental, off by default).** Runs the dense
+sub-networks — where nearly all the convolutions are — in float16 on NVIDIA
+GPUs (bfloat16 on CPU), with loss scaling. Everything that has to stay exact
+for the network to remain invertible stays float32: the coupling arithmetic,
+the invertible 1×1 convolutions, the differentiable JPEG, the losses, and
+evaluation (so scores stay comparable). Whether it pays off depends on the
+GPU: measure first with `python tools/amp_check.py --data_path data/` (or
+`AMP_CHECK_ONLY = True` on Kaggle), which times both precisions, compares
+their losses, gradients and invertibility on the same weights, trains both
+side by side for 150 steps, and prints a verdict.
+
 **Log volume.** A step line is printed every `--log_every` steps (default
 50), with the losses and timings averaged over those steps, plus the first
 step and the last step of each epoch. Each `[INFO] Epoch N time:` line also

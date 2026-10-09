@@ -197,3 +197,14 @@ def test_new_task_starts_from_another_runs_best_weights(kaggle, monkeypatch):
     assert seen == {"files": ["latest.pth"], "w": 1.0}  # best.pth copied as a weights-only start, no state
     with pytest.raises(SystemExit, match="no checkpoint found"):
         kr.run(task="other-run", init_from="missing-run")
+
+
+def test_amp_check_only_measures_without_training(kaggle, monkeypatch):
+    kr.run(cameras="all", budget_gb=5)
+    _publish_as_dataset(kaggle)
+    calls = []
+    monkeypatch.setattr(kr, "train", lambda *a, **k: calls.append("train") or 0)
+    monkeypatch.setattr(kr.subprocess, "call", lambda cmd, **k: calls.append(cmd) or 0)
+    assert kr.run(amp_check_only=True) == "amp checked"
+    assert "train" not in calls
+    assert calls[0][1].endswith("amp_check.py") and "--data_path" in calls[0]

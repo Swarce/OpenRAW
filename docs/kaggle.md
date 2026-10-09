@@ -61,6 +61,16 @@ of the notebook, attach the prepared dataset (and the training notebook's
 latest output, to include its `best.pth`), set `COMPARE_ONLY = True` and
 Accelerator **None**. On CPU it takes roughly 5-10 minutes per model.
 
+## Checking mixed precision
+
+`AMP_CHECK_ONLY = True` (GPU session, prepared data attached) runs
+`tools/amp_check.py` instead of training: step time with and without
+`--amp` on this GPU, how far `--amp`'s gradients are from float32's, and a
+short side-by-side training run, ending in a one-line VERDICT. About 5-10
+minutes of GPU quota. If it says worth it, add `"--amp"` to
+`EXTRA_TRAIN_ARGS` — for a **new** `TASK` (with `INIT_FROM`), so its scores
+aren't mixed with a float32 run's.
+
 ## More data: RAISE (optional)
 
 RAISE (8,156 Nikon raws; **non-commercial research use only**, see

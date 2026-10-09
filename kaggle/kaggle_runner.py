@@ -372,6 +372,18 @@ def compare(task: str, data_root: Path, out: Path = None, extra: list | None = N
         return 1
 
 
+def amp_check(data_root: Path) -> int:
+    """tools/amp_check.py on this session's GPU and real training crops: is
+    mixed precision (train.py --amp) faster here, and at what accuracy cost?"""
+    cmd = [sys.executable, str(REPO / "tools" / "amp_check.py"), "--data_path", str(data_root) + "/"]
+    log("checking mixed precision on this GPU (a few minutes) ...")
+    try:
+        return subprocess.call(cmd, cwd=str(REPO), env=dict(os.environ, PYTHONUNBUFFERED="1"))
+    except Exception as e:  # noqa: BLE001
+        log(f"mixed-precision check failed: {e}")
+        return 1
+
+
 def write_status(task: str, epochs: int) -> str:
     """Leave a one-line STATUS.txt in the output saying whether to run again."""
     import torch
@@ -391,13 +403,15 @@ def write_status(task: str, epochs: int) -> str:
 # ---------------------------------------------------------------------- main
 def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, session_start=None,
         extra_train_args=None, gpus=0, raise_csv=None, raise_cameras=(), raise_start=0, compare_only=False,
-        init_from=None):
+        init_from=None, amp_check_only=False):
     """raise_csv: prepare RAISE instead of FiveK or training -- a path, or True
     to use the CSV with a NEF column among the attached inputs.
     compare_only: don't train; score the checkpoints on the held-out test
     images (needs the prepared data attached; works on CPU).
     init_from: when `task` has no checkpoint yet, start it from another run's
-    weights -- that run's TASK name (its output attached) or a .pth path."""
+    weights -- that run's TASK name (its output attached) or a .pth path.
+    amp_check_only: don't train; measure whether mixed precision (--amp) is
+    faster on this GPU and what it costs in accuracy (tools/amp_check.py)."""
     session_start = session_start or time.time()
     if raise_csv:
         csv_path = find_raise_csv(INPUT) if raise_csv is True else Path(raise_csv)
@@ -424,6 +438,9 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     if compare_only:
         code = compare(task, data_root)
         return "compared" if code == 0 else f"comparison exited with code {code}"
+    if amp_check_only:
+        code = amp_check(data_root)
+        return "amp checked" if code == 0 else f"amp check exited with code {code}"
     ck = find_checkpoint(task, INPUT)
     if ck:
         restore_checkpoint(ck, WORKING / "exps", task)

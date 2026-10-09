@@ -85,6 +85,11 @@ summarized; commit messages carry the full detail and measurements.
   schedule, test set and best score.
 - `--invisp-checkpoint` on a full-state `latest_state.pth` uses its weight
   average when it has one.
+- **`--amp` mixed precision** (experimental, off by default): float16 only in
+  the dense sub-networks, float32 for the invertible coupling, JPEG
+  simulation, losses and evaluation; loss scaling, kept consistent across
+  GPUs. `tools/amp_check.py` (Kaggle: `AMP_CHECK_ONLY = True`) measures the
+  speed-up and accuracy cost on the actual GPU before using it.
 - **Weight averaging (`--ema`, default 0.999)**: evaluation and the saved
   `best.pth` / `latest.pth` / `NNNN.pth` use an exponential moving average of
   the weights, which doesn't jitter between snapshots the way the live

@@ -290,3 +290,31 @@ def test_ema_off_saves_live_weights(trainer):
     latest = torch.load(ckpt / "latest.pth", weights_only=True)
     assert all(torch.equal(latest[k], v) for k, v in st["net"].items())
     assert "ema" not in st
+
+
+def test_amp_trains_and_evaluates_in_full_precision(trainer):
+    """--amp: training runs (bfloat16 sub-networks on CPU), losses stay finite,
+    evaluation still scores in float32, and the saved weights load normally."""
+    run, ckpt = trainer
+    st = run(epochs=2, eval_every=1, amp=True)
+    rows = (ckpt.parent / "eval.csv").read_text().strip().splitlines()
+    assert len(rows) == 3 and all(5 < float(r.split(",")[2]) < 99 for r in rows[1:])
+    assert all(torch.isfinite(v).all() for v in st["net"].values() if v.is_floating_point())
+    st2 = run(epochs=3, amp=True, resume=True)  # resumes like any run
+    assert st2["epoch"] == 2
+
+
+def test_amp_only_touches_the_dense_subnetworks():
+    import train
+    from openraw.third_party.invisp.model.model import InvISPNet
+    torch.manual_seed(0)
+    a = InvISPNet(channel_in=3, channel_out=3, block_num=2)
+    b = InvISPNet(channel_in=3, channel_out=3, block_num=2); b.load_state_dict(a.state_dict())
+    assert train._enable_amp(b, torch.device("cpu")) == 6  # F, G, H per block
+    x = torch.rand(1, 3, 64, 64)
+    with torch.no_grad():
+        ya, yb = a(x), b(x)
+        assert ya.dtype == yb.dtype == torch.float32
+        assert (ya - yb).abs().max() < 0.05  # reduced precision, same function
+        # still an invertible network: the coupling runs in float32
+        assert (b(yb, rev=True) - x).abs().max() < 1e-3

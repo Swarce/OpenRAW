@@ -104,6 +104,11 @@ if __name__ == "__main__":
                              "than any single step's. 0 = off.")
     parser.add_argument("--eval_images", type=int, default=40, help="max test images per evaluation (spread across cameras)")
     parser.add_argument("--eval_crop", type=int, default=512, help="centre crop size for evaluation")
+    parser.add_argument("--amp", action="store_true",
+                        help="mixed precision (experimental): the dense sub-networks, where nearly all the compute "
+                             "is, run in float16 on CUDA (bfloat16 on CPU); the invertible coupling, the JPEG "
+                             "simulation, the losses and evaluation stay float32. Check speed and accuracy first "
+                             "with tools/amp_check.py.")
     parser.add_argument("--checkpointing", choices=["auto", "on", "off"], default="auto",
                         help="gradient checkpointing: recompute each block's activations in the backward pass instead "
                              "of storing them. A 256 px step needs ~6.2 GB without it, ~2.5 GB with it, for ~30-40%% "
@@ -211,6 +216,29 @@ def evaluate(net, loader, device):
             raw_p.append(_psnr(net(rgb, rev=True), raw))
     net.train(was_training)
     return float(np.mean(raw_p)), float(np.mean(rgb_p))
+
+
+def _enable_amp(net, device):
+    """PATCHED (OpenRAW): mixed precision, applied where it's safe. Each
+    InvBlock's coupling (y1 = x1 + F(x2); y2 = x2 * exp(s(y1)) + G(y1)) is
+    invertible whatever F, G and H compute, as long as the additions,
+    multiplications and exp themselves are exact enough -- so only the dense
+    sub-networks F, G, H (all the convolutions, ~all the FLOPs) run in reduced
+    precision, and hand float32 back to the coupling. The invertible 1x1
+    convolutions, the differentiable JPEG, the losses and evaluation are
+    untouched. Wraps forward() only; the state_dict is unchanged."""
+    from openraw.third_party.invisp.model.model import DenseBlock
+    dtype = torch.float16 if device.type == "cuda" else torch.bfloat16
+    n = 0
+    for m in net.modules():
+        if isinstance(m, DenseBlock):
+            f = m.forward
+            def fwd(x, f=f):
+                with torch.autocast(device.type, dtype=dtype):
+                    return f(x).float()
+            m.forward = fwd
+            n += 1
+    return n
 
 
 def _enable_checkpointing(net):
@@ -346,6 +374,14 @@ def main(args, rank=0, world=1):
     jpeg = jpeg.to(device)
     gpu_gb = torch.cuda.get_device_properties(device).total_memory / 2**30 if device.type == "cuda" else None
     use_ckpt = {"on": True, "off": False}.get(getattr(args, "checkpointing", "auto"), gpu_gb is None or gpu_gb < 12)
+    use_amp = bool(getattr(args, "amp", False))
+    if use_amp:
+        n_sub = _enable_amp(net, device)
+        print(f"[INFO] mixed precision: {n_sub} dense sub-networks in "
+              f"{'float16' if device.type == 'cuda' else 'bfloat16'}, everything else float32")
+    # float16 gradients can underflow to zero: scale the loss up for backward, and
+    # skip steps whose gradients overflowed (the scale adapts). Off = a no-op.
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp and device.type == "cuda")
     if use_ckpt:
         _enable_checkpointing(net)
     print(f"[INFO] gradient checkpointing: {'on' if use_ckpt else 'off'}"
@@ -396,6 +432,9 @@ def main(args, rank=0, world=1):
         print(f"[INFO] weight averaging (EMA) decay {args.ema}: evaluation and saved weights use the average"
               + (" (continuing the saved average)" if st.get("ema") is not None else
                  " (starting from the current weights)" if args.resume else ""))
+    elif rank == 0 and use_amp:
+        # evaluation always runs in full precision, so scores stay comparable
+        eval_net = InvISPNet(channel_in=3, channel_out=3, block_num=getattr(args, "blocks", 8)).to(device)
 
     print("[INFO] Start data loading and preprocessing")
     RAWDataset = FiveKDatasetTrain(opt=args)
@@ -479,10 +518,13 @@ def main(args, rank=0, world=1):
             loss = args.rgb_weight * rgb_loss + raw_loss
 
             optimizer.zero_grad()
-            loss.backward()
+            scaler.scale(loss).backward()
             if world > 1:
+                # averaged before the scaler looks at them: an overflow on any
+                # process becomes inf on every process, so all skip the same steps
                 _average_gradients(params, world)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             if ema is not None:
                 ema.update()
 
@@ -514,8 +556,8 @@ def main(args, rank=0, world=1):
             continue
         if eval_loader is not None and ((epoch + 1) % eval_every == 0 or epoch == args.epochs - 1):
             t_eval = time.time()
-            if ema is not None:
-                eval_net.load_state_dict(ema.state_dict())
+            if eval_net is not net:
+                eval_net.load_state_dict(ema.state_dict() if ema is not None else net.state_dict())
             raw_psnr, rgb_psnr = evaluate(eval_net, eval_loader, device)
             is_best = raw_psnr > best_raw
             if is_best:
