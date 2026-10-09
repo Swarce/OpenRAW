@@ -228,3 +228,18 @@ def test_resuming_refuses_when_a_trained_camera_is_missing(kaggle, monkeypatch):
     monkeypatch.setattr(kr, "train", lambda *a, **k: pytest.fail("must not train"))
     with pytest.raises(SystemExit, match="RAISE_Nikon_D90"):
         kr.run(task="t")
+
+
+def test_unrecognised_input_layout_is_printed_when_cameras_are_missing(kaggle, monkeypatch, capsys):
+    kr.run(cameras="all", budget_gb=5)
+    _publish_as_dataset(kaggle)
+    odd = kaggle / "input" / "fivek-odd" / "stuff"; odd.mkdir(parents=True)
+    (odd / "pairs.zip").write_bytes(b"x")
+    ck = kaggle / "input" / "prev" / "exps" / "t" / "checkpoint"; ck.mkdir(parents=True)
+    (ck / "latest.pth").write_bytes(b"x")
+    (ck.parent / "commandline_args.yaml").write_text('{"camera": ["Testco_T1", "Canon_EOS_5D"]}')
+    with pytest.raises(SystemExit, match="Canon_EOS_5D"):
+        kr.run(task="t")
+    out = capsys.readouterr().out
+    assert "input fivek-odd contains no prepared data" in out and "pairs.zip" in out
+    assert "input prev contains" not in out  # the checkpoint input isn't listed as data

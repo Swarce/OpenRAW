@@ -102,6 +102,26 @@ def attached_inputs(root: Path = None) -> list[Path]:
     return out
 
 
+def describe_tree(root: Path, depth: int = 4, per_dir: int = 6) -> list[str]:
+    """A short listing of a folder's layout: each sub-folder (to `depth`) with
+    its file count and a few names -- for telling why an input wasn't used."""
+    lines = []
+    root = Path(root)
+    for dirpath, dirnames, filenames in os.walk(root):
+        d = Path(dirpath)
+        rel = d.relative_to(root)
+        if len(rel.parts) >= depth:
+            dirnames[:] = []
+        dirnames.sort()
+        shown = sorted(filenames)[:per_dir]
+        more = f" ... (+{len(filenames) - len(shown)})" if len(filenames) > len(shown) else ""
+        lines.append(f"{'  ' * len(rel.parts)}{d.name}/  [{len(filenames)} files] {', '.join(shown)}{more}")
+        if len(lines) > 60:
+            lines.append("  ...")
+            break
+    return lines
+
+
 def trained_cameras(ckpt_dir: Path) -> list[str]:
     """The cameras a run was trained on, from its commandline_args.yaml (next
     to its checkpoint folder); [] if unknown."""
@@ -494,6 +514,13 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     if ck:
         missing = [c for c in trained_cameras(ck) if c not in cams]
         if missing and not compare_only and not amp_check_only:
+            for a in attached_inputs(INPUT):
+                if not any(r == a or a in r.parents for r in roots) and not (a / "exps").is_dir():
+                    log(f"input {a.name} contains no prepared data the runner recognises. Its layout:")
+                    for line in describe_tree(a):
+                        log("   " + line)
+                    log("   (expected: <Camera>_train.txt files next to <Camera>/RAW/*.npz folders, "
+                        "e.g. openraw-data/NIKON_D700_train.txt + openraw-data/NIKON_D700/RAW/)")
             # resuming on part of the data silently changes what the run learns
             # AND what its evaluation measures -- stop before spending GPU time
             raise SystemExit(f"run {task!r} was trained on cameras that aren't in the attached data: "
