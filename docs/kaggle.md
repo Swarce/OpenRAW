@@ -107,7 +107,7 @@ Held-out raw PSNR was 39.1 dB at epoch 35.
 (every 18 epochs for 182), so a session can pass with few or no `[EVAL]`
 lines. Each evaluation takes ~30 s; to evaluate more often, pass extra
 arguments in the notebook's last cell:
-`kr.run(..., extra_train_args=["--eval_every", "6"])`. Every result is also
+`EXTRA_TRAIN_ARGS = ["--eval_every", "6"]` in the config cell. Every result is also
 in `exps/<task>/eval.csv` in the output, which Kaggle keeps even when its log
 viewer trims old lines.
 
