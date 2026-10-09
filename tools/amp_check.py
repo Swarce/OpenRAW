@@ -108,6 +108,7 @@ def main(argv=None) -> int:
     ap.add_argument("--train_steps", type=int, default=150, help="steps for the side-by-side training test")
     ap.add_argument("--device", default=None)
     ap.add_argument("--blocks", type=int, default=8, help="InvISP depth (8 = the real network; less for testing)")
+    ap.add_argument("--crop", type=int, default=256, help="crop size for synthetic crops (training uses 256)")
     a = ap.parse_args(argv)
     import torch
     from openraw.third_party.invisp.utils.JPEG import DiffJPEG
@@ -117,8 +118,8 @@ def main(argv=None) -> int:
     jpeg = DiffJPEG(differentiable=True, quality=90).to(device)
     name = torch.cuda.get_device_name(device) if device.type == "cuda" else "CPU"
     print(f"[amp] {name}; {'trained weights ' + Path(ckpt).name if ckpt else 'random weights'}; "
-          f"{'real' if a.data_path else 'synthetic'} 256 px crops", flush=True)
-    data = _batches(a.data_path, max(a.timing_steps, a.train_steps) + 8, device)
+          f"{'real 256' if a.data_path else f'synthetic {a.crop}'} px crops", flush=True)
+    data = _batches(a.data_path, max(a.timing_steps, a.train_steps) + 8, device, crop=a.crop)
     held_out = data[-8:]
     rows = {}
 
