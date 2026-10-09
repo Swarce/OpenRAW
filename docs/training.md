@@ -189,6 +189,14 @@ keeps both, so `--resume` continues the average. Runs saved before this
 existed resume too: the average starts from the current weights. `--ema 0`
 turns it off.
 
+**TPU (`--device xla`, experimental).** Trains on TPUs through PyTorch/XLA
+(`pip install torch_xla` matching your PyTorch). `--gpus 0` uses every core,
+`--gpus 1` one (PyTorch/XLA allows nothing in between; `TPU_NUM_DEVICES`
+limits the cores). `--tpu_precision` (default `high`) sets the precision of
+float32 matrix maths. Run `tools/tpu_selftest.py` first to check that the
+cores can talk to each other. Verified on an emulated XLA device; untested
+on TPU hardware so far. See [kaggle.md](kaggle.md#tpu-experimental).
+
 **Mixed precision (`--amp`, experimental, off by default).** Runs the dense
 sub-networks — where nearly all the convolutions are — in float16 on NVIDIA
 GPUs (bfloat16 on CPU), with loss scaling. Everything that has to stay exact

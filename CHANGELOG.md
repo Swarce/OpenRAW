@@ -92,6 +92,12 @@ summarized; commit messages carry the full detail and measurements.
   schedule, test set and best score.
 - `--invisp-checkpoint` on a full-state `latest_state.pth` uses its weight
   average when it has one.
+- **TPU training, experimental** (`train.py --device xla`; Kaggle
+  notebook `ACCELERATOR = "auto"`/`"tpu"`): PyTorch/XLA on every TPU core,
+  gradients averaged across cores, a self-test of the cores before training
+  with fallback to one core, `--tpu_precision`, more data-loading workers on
+  TPU VMs, CPU-tensor checkpoints that resume on GPUs. Tested on an emulated
+  XLA device (gradients match the CPU's to 0.04%); not yet on TPU hardware.
 - **`--amp` mixed precision** (experimental, off by default): float16 only in
   the dense sub-networks, float32 for the invertible coupling, JPEG
   simulation, losses and evaluation; loss scaling, kept consistent across

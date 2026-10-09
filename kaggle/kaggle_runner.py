@@ -374,9 +374,47 @@ def choose_gpus(gpus: int, env: dict) -> tuple[int, dict]:
     return 1, env
 
 
+def tpu_present() -> bool:
+    """Is this a TPU VM? Checked without starting PyTorch/XLA here: a TPU can be
+    held by one process at a time, and training runs in a separate one."""
+    return bool(os.environ.get("TPU_NAME") or os.environ.get("TPU_ACCELERATOR_TYPE")
+                or os.environ.get("PJRT_DEVICE", "").upper() == "TPU"
+                or any(Path("/dev").glob("accel*")) or Path("/dev/vfio").is_dir() and _xla_installed())
+
+
+def _xla_installed() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("torch_xla") is not None
+
+
+def _tpu_selftest(env: dict, timeout: float = 600) -> bool:
+    """tools/tpu_selftest.py in a subprocess: every core all-reduces, checked."""
+    try:
+        r = subprocess.run([sys.executable, str(REPO / "tools" / "tpu_selftest.py")], env=env,
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        log(f"TPU self-test: no response within {timeout:.0f}s (hung)")
+        return False
+    ok = r.returncode == 0 and "SELFTEST OK" in r.stdout
+    tail = [l for l in (r.stdout + r.stderr).strip().splitlines() if l.strip()][-1:] or [""]
+    log(f"TPU self-test: {'passed' if ok else 'FAILED'} -- {tail[0][:200]}")
+    return ok
+
+
+def choose_accelerator(accelerator: str) -> str:
+    """'gpu' or 'tpu' for accelerator 'auto' / 'gpu' / 'tpu'. auto: a GPU if
+    the session has one, else a TPU if there is one, else 'gpu' (train.py then
+    explains that no GPU is usable)."""
+    if accelerator in ("gpu", "tpu"):
+        return accelerator
+    if _gpu_count() == 0 and tpu_present():
+        return "tpu"
+    return "gpu"
+
+
 def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hours: float | None = None,
           workers: int = 3, extra_args: list[str] | None = None, session_start: float | None = None,
-          gpus: int = 0) -> int:
+          gpus: int = 0, accelerator: str = "auto") -> int:
     """Run train.py on all cameras in data_root, resuming if a checkpoint is in
     the output folder, within the remaining session time. gpus: 0 = every GPU
     the session has (both on "GPU T4 x2"), after a communication self-test.
@@ -389,7 +427,21 @@ def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hour
     # in Kaggle's log (buffered output is invisible until a buffer fills or the
     # process exits -- a stalled run then shows nothing at all)
     env = dict(os.environ, PYTHONUNBUFFERED="1")
-    gpus, env = choose_gpus(gpus, env)
+    kind = choose_accelerator(accelerator)
+    device_args = []
+    if kind == "tpu":
+        # EXPERIMENTAL: every TPU core if they can talk to each other, else one
+        if not _xla_installed():
+            raise SystemExit("TPU selected but PyTorch/XLA (torch_xla) isn't installed -- see docs/kaggle.md")
+        env.setdefault("PJRT_DEVICE", "TPU")
+        gpus = 0 if gpus in (0, None) and _tpu_selftest(env) else 1
+        device_args = ["--device", "xla"]
+        # TPU VMs have dozens of CPU cores: feed every TPU core from several loader processes
+        workers = max(workers, min(32, (os.cpu_count() or 8) - 4))
+        log(f"TPU (experimental): {'every core' if gpus == 0 else 'one core'}; {workers} data-loading workers")
+    else:
+        gpus, env = choose_gpus(gpus, env)
+    unit = "TPU core(s)" if kind == "tpu" else "GPU(s)"
 
     def run_once(n_gpus: int) -> int:
         limit = time_limit_hours
@@ -401,15 +453,17 @@ def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hour
         cmd = [sys.executable, "train.py", "--task", task, "--all-downloaded", "--gamma", "--aug",
                "--data_path", str(data_root) + "/", "--out_path", str(out_path) + "/",
                "--epochs", str(epochs), "--workers", str(workers), "--gpus", str(n_gpus),
-               "--time_limit_hours", f"{limit:.3f}"] + (["--resume"] if resume else []) + (extra_args or [])
-        log(f"{n} training pairs -> {epochs} epochs (~{n * epochs:,} steps); {n_gpus} GPU(s); "
+               "--time_limit_hours", f"{limit:.3f}"] + device_args + (["--resume"] if resume else []) + (extra_args or [])
+        log(f"{n} training pairs -> {epochs} epochs (~{n * epochs:,} images); "
+            f"{'all' if n_gpus == 0 else n_gpus} {unit}; "
             f"time budget {limit:.2f} h; {'resuming' if resume else 'fresh start'}")
         log(" ".join(cmd))
         return subprocess.call(cmd, cwd=str(REPO), env=env)
 
     code = run_once(gpus)
-    if code != 0 and gpus > 1:
-        log(f"multi-GPU training exited with code {code} -- retrying on 1 GPU from the last saved epoch")
+    if code != 0 and (gpus > 1 or (kind == "tpu" and gpus == 0)):
+        log(f"multi-{'core' if kind == 'tpu' else 'GPU'} training exited with code {code} -- retrying on 1 "
+            f"{'TPU core' if kind == 'tpu' else 'GPU'} from the last saved epoch")
         code = run_once(1)
     return code
 
@@ -468,7 +522,7 @@ def write_status(task: str, epochs: int) -> str:
 # ---------------------------------------------------------------------- main
 def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, session_start=None,
         extra_train_args=None, gpus=0, raise_csv=None, raise_cameras=(), raise_start=0, compare_only=False,
-        init_from=None, amp_check_only=False):
+        init_from=None, amp_check_only=False, accelerator="auto"):
     """raise_csv: prepare RAISE instead of FiveK or training -- a path, or True
     to use the CSV with a NEF column among the attached inputs.
     compare_only: don't train; score the checkpoints on the held-out test
@@ -476,7 +530,9 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     init_from: when `task` has no checkpoint yet, start it from another run's
     weights -- that run's TASK name (its output attached) or a .pth path.
     amp_check_only: don't train; measure whether mixed precision (--amp) is
-    faster on this GPU and what it costs in accuracy (tools/amp_check.py)."""
+    faster on this GPU and what it costs in accuracy (tools/amp_check.py).
+    accelerator: 'auto' (a GPU if there is one, else a TPU), 'gpu', or 'tpu'
+    (experimental: PyTorch/XLA on every TPU core)."""
     session_start = session_start or time.time()
     for a in attached_inputs(INPUT):
         log(f"input: {a}")
@@ -538,7 +594,7 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     n = count_train_pairs(data_root)
     epochs = epochs or suggest_epochs(n)
     code = train(task, data_root, epochs=epochs, workers=workers, session_start=session_start,
-                 extra_args=extra_train_args, gpus=gpus)
+                 extra_args=extra_train_args, gpus=gpus, accelerator=accelerator)
     write_status(task, epochs)
     compare(task, data_root)  # a minute or two on a GPU; leaves compare/compare.md in the output
     return "trained" if code == 0 else f"train.py exited with code {code}"

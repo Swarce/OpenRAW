@@ -61,6 +61,39 @@ of the notebook, attach the prepared dataset (and the training notebook's
 latest output, to include its `best.pth`), set `COMPARE_ONLY = True` and
 Accelerator **None**. On CPU it takes roughly 5-10 minutes per model.
 
+## TPU (experimental)
+
+Kaggle's TPU quota (20 h a week) is separate from the GPU one, so a TPU
+session is extra training time. Set Accelerator to **TPU VM** and leave
+`ACCELERATOR = "auto"` (or set `"tpu"`); everything else works as on GPUs.
+
+- Training runs through **PyTorch/XLA** on **every TPU core** (8 on Kaggle):
+  each core takes its own image per step and the gradients are averaged, as
+  on two GPUs, so a step trains on 8 images. Before training, a self-test
+  (`tools/tpu_selftest.py`) checks that the cores can exchange data; if it
+  fails, training uses one core, and a failed all-core run is retried on one
+  core from the last saved epoch.
+- The setup cell installs the PyTorch/XLA release matching the session's
+  PyTorch if Kaggle's image doesn't include one. If none matches, it says so.
+- Data loading gets more worker processes (TPU VMs have many CPU cores).
+- Matrix maths runs at `--tpu_precision high` (~14 bits, 3 passes) by
+  default; TPUs otherwise round float32 to bfloat16. `default` is faster,
+  `highest` full float32.
+- Checkpoints are ordinary CPU tensors: a TPU run's output resumes on GPUs and
+  vice versa, and its `best.pth` works with `openraw --invisp-checkpoint`.
+
+**What's verified:** the XLA training path (training, evaluation, weight
+averaging, saving, resuming, `--amp` in bfloat16) runs on one emulated XLA
+device, and its gradients match the CPU's to 0.04%. **Not yet verified:**
+anything on real TPU hardware, including the all-core gradient exchange and
+the speed. Watch the first session's log: `[INFO] TPU/XLA: replica 1 of 8`,
+the self-test result, and the epoch times.
+
+Note that 8 cores make the effective batch 8 images instead of 2, with 8x
+fewer steps per epoch: a different optimisation from the GPU runs. Treat a
+TPU run as its own `TASK` rather than alternating one run between GPUs and
+TPUs.
+
 ## Checking mixed precision
 
 `AMP_CHECK_ONLY = True` (GPU session, prepared data attached) runs
