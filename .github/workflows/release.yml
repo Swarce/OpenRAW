@@ -120,5 +120,19 @@ jobs:
           fi
           PRE=""
           case "$TAG" in *a*|*b*|*rc*|*dev*) PRE="--prerelease" ;; esac
-          gh release create "$TAG" assets/* $PRE --target "$GITHUB_SHA" --title "OpenRAW ${TAG#v}" \
-            --notes-file packaging/release-notes.md
+          echo "tag $TAG on $GITHUB_SHA ${PRE:-(full release)}"
+          # On failure, show gh's own message as an annotation on the run's
+          # summary page (job logs are often not at hand).
+          report() {
+            msg=$(tr '\n' ' ' < "$1" | cut -c1-900)
+            echo "::error title=$2::$msg"
+            cat "$1"
+            exit 1
+          }
+          gh release create "$TAG" $PRE --target "$GITHUB_SHA" --title "OpenRAW ${TAG#v}" \
+            --notes-file packaging/release-notes.md --draft > out.txt 2>&1 || report out.txt "Creating the release failed"
+          for f in assets/*; do
+            gh release upload "$TAG" "$f" > out.txt 2>&1 || report out.txt "Uploading $(basename "$f") failed"
+            echo "uploaded $(basename "$f")"
+          done
+          gh release edit "$TAG" --draft=false > out.txt 2>&1 || report out.txt "Publishing the draft failed"
