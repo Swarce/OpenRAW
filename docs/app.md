@@ -17,7 +17,8 @@ you ask, an interrupted conversion never leaves a half-written file).
 | `OpenRAW-<version>-linux-x64.tar.gz` | Linux x64 (glibc 2.35+: Ubuntu 22.04, Fedora 36 and newer) | extract, run `OpenRAW/OpenRAW` |
 
 Each is self-contained (Python, Qt, PyTorch for the CPU, and both InvISP
-models), around 1 GB unpacked. Intel Macs: use the source install below.
+models): a 280 MB download for Windows and macOS, 430 MB for Linux. Intel
+Macs: use the source install below.
 
 **From source**, with the command line alongside:
 
