@@ -96,6 +96,7 @@ Adding a theme is one entry in `THEMES` in
   real conversions, skipping existing files, stopping mid-file.
 - Builds: `pyinstaller packaging/openraw.spec`; the
   [release workflow](../.github/workflows/release.yml) builds all three
-  platforms when a `v*` tag is pushed, smoke-tests each build by converting
-  a sample photo with every bundled model (`--selftest`), and publishes the
-  release.
+  platforms and smoke-tests each build by converting a sample photo with
+  every bundled model (`--selftest`). It publishes a release when a `v*` tag
+  is pushed, or when run from the Actions tab with *publish* ticked (which
+  tags the commit `v<version>`, the version in `openraw/_version.py`).
