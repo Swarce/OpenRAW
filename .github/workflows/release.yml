@@ -106,13 +106,14 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
         with:
-          path: assets
+          path: ${{ runner.temp }}/release-files  # not ./assets: that's the repo's own assets/ folder
           merge-multiple: true
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ls -la assets
+          FILES="$RUNNER_TEMP/release-files"
+          ls -la "$FILES"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             TAG="${GITHUB_REF_NAME}"
           else
@@ -129,9 +130,14 @@ jobs:
             cat "$1"
             exit 1
           }
+          # a draft left by an earlier failed run of the same version is replaced
+          if [ "$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null)" = "true" ]; then
+            gh release delete "$TAG" --yes
+          fi
           gh release create "$TAG" $PRE --target "$GITHUB_SHA" --title "OpenRAW ${TAG#v}" \
             --notes-file packaging/release-notes.md --draft > out.txt 2>&1 || report out.txt "Creating the release failed"
-          for f in assets/*; do
+          for f in "$FILES"/*; do
+            [ -f "$f" ] || continue
             gh release upload "$TAG" "$f" > out.txt 2>&1 || report out.txt "Uploading $(basename "$f") failed"
             echo "uploaded $(basename "$f")"
           done
