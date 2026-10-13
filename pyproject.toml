@@ -15,6 +15,7 @@ keywords = ["dng", "raw", "jpeg", "photography", "linear-dng", "bayer", "demosai
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
     "Intended Audience :: End Users/Desktop",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
@@ -38,9 +39,14 @@ training = ["torch>=1.10", "torchvision", "rawpy", "colour-demosaicing>=0.2"]
 # rawpy (= libraw) lets the tests check output in a real raw decoder, not just
 # tifffile reading back its own files -- that gap once hid a real bug.
 dev = ["pytest>=7.4", "rawpy", "colour-demosaicing>=0.2"]
+# the desktop app (openraw-gui); rawpy renders DNGs for its before/after view
+gui = ["PySide6>=6.5", "rawpy"]
 
 [project.scripts]
 openraw = "openraw.cli:main"
+
+[project.gui-scripts]
+openraw-gui = "openraw.gui.__main__:main"
 
 [project.urls]
 Repository = "https://github.com/Swarce/OpenRAW"
@@ -53,6 +59,7 @@ include = ["openraw*"]
 
 [tool.setuptools.package-data]
 "openraw.third_party.invisp" = ["LICENSE", "UPSTREAM_README.md"]
+"openraw.gui" = ["*.ttf", "*.png", "OFL-Saira.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

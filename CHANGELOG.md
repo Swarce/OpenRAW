@@ -3,7 +3,25 @@
 All notable changes. Development history before the first release is
 summarized; commit messages carry the full detail and measurements.
 
-## [Unreleased] — 0.1.0.dev0
+## [0.1.0a1] — 2026-10-12
+
+First pre-release, with downloadable desktop app builds.
+
+### Added — desktop app
+- **OpenRAW app** (`openraw-gui`, `pip install ".[gui]"`; or the downloads on
+  the releases page): drag-and-drop queue with per-photo progress, all the
+  conversion settings (method, CPU/GPU, linear or Bayer with anti-aliasing,
+  bit depth, compression, metadata, destination), Stop that never leaves a
+  half-written file, and a before/after view of each JPEG against its DNG as
+  LibRaw renders it (flat, or matched to the JPEG; fit or 100%). Settings are
+  remembered. Conversions run in a worker process through the command line's
+  own code. Themes: Light, Dark, Darkroom, High contrast dark and light
+  (orange accent), Solarized, or follow the system. See `docs/app.md`.
+- Self-contained builds for Windows x64, macOS (Apple silicon) and Linux x64
+  with both InvISP models, built and smoke-tested by
+  `.github/workflows/release.yml` on every `v*` tag.
+- `OpenRawPipeline(config, progress=...)`: a progress callback (stage name,
+  overall fraction), also reported per tile by InvISP inference.
 
 ### Fixed
 - `tools/raw_pair_eval.py` scored CFA DNGs 4 px out of alignment (LibRaw

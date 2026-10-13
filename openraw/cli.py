@@ -192,13 +192,14 @@ def plan_jobs(inputs: list[str], output: str | None, recursive: bool) -> list[tu
     return plan
 
 
-def _convert_one(src: str, dst: str, config: PipelineConfig) -> dict:
-    """Runs in a worker process (or inline for --jobs 1). Never raises."""
+def _convert_one(src: str, dst: str, config: PipelineConfig, progress=None) -> dict:
+    """Runs in a worker process (or inline for --jobs 1). Never raises.
+    progress: optional callable(stage, fraction), see OpenRawPipeline."""
     t0 = time.time()
     try:
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
         tmp = dst + ".partial"  # write-then-rename: an interrupted run never leaves a truncated .dng
-        result = OpenRawPipeline(config).run_to_dng(src, tmp)
+        result = OpenRawPipeline(config, progress).run_to_dng(src, tmp)
         os.replace(tmp, dst)
         d = result.decoded
         n_exif = len(d.exif_fields.get("ifd0", {})) + len(d.exif_fields.get("exif_sub", {})) if d.exif_fields else 0

@@ -34,7 +34,26 @@ right: after OpenRAW's cleanup. Real photos saved at normal quality have far
 milder artifacts; there, the main gain is the 16-bit linear headroom. See
 [docs/how-it-works.md](docs/how-it-works.md).*
 
-## Install
+## Desktop app
+
+![The OpenRAW desktop app](assets/screenshots/app-light.png)
+
+Drop photos or whole folders in, pick the settings, press Convert. A
+before/after view compares each JPEG with its DNG as a raw editor renders
+it, and the queue shows each photo's progress. Themes: Light, Dark,
+Darkroom (red accent), High contrast dark and light (orange accent),
+Solarized, or follow the system ([all themes](docs/app.md#themes)).
+
+**Download** it from the [releases page](https://github.com/Swarce/OpenRAW/releases):
+Windows (x64), macOS (Apple silicon) and Linux (x64) builds, nothing else
+to install; both InvISP models are included. The builds aren't signed yet,
+so the first launch needs one extra click ([how](docs/app.md#first-launch)).
+Or from a source install: `pip install ".[gui]"`, then `openraw-gui`.
+
+The command line below does everything the app does, and stays the way to
+script it. More in [docs/app.md](docs/app.md).
+
+## Install (command line)
 
 Requires Python 3.10+. Until there's a PyPI release:
 
@@ -128,6 +147,7 @@ vs 24 dB as you'd see it ([details](docs/invisp.md#against-a-real-raw-sony-nex-7
 
 ## Documentation
 
+- [Desktop app](docs/app.md) — the app, its themes, and the downloadable builds
 - [How it works](docs/how-it-works.md) — the reconstruction pipeline, stage by stage
 - [DNG format notes](docs/dng-format.md) — how files are written, and what was tested against what
 - [InvISP network](docs/invisp.md) — the optional learned reconstruction path

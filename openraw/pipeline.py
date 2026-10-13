@@ -15,6 +15,7 @@ the ordering and the config surface.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 
@@ -75,16 +76,32 @@ class PipelineResult:
     rgb16: np.ndarray  # uint16, final data written to DNG
 
 
+Progress = Callable[[str, float], None]  # (stage name, overall fraction 0..1)
+
+
 class OpenRawPipeline:
-    def __init__(self, config: PipelineConfig | None = None):
+    """progress: optional callable(stage, fraction) -- the stage's name and how
+    far the whole conversion is, 0..1. Used by the desktop app; costs nothing
+    when unset."""
+
+    def __init__(self, config: PipelineConfig | None = None, progress: Progress | None = None):
         self.config = config or PipelineConfig()
+        self.progress = progress
+
+    def _report(self, stage: str, fraction: float) -> None:
+        if self.progress is not None:
+            self.progress(stage, min(1.0, max(0.0, fraction)))
 
     def run(self, jpeg_path: str) -> PipelineResult:
+        self._report("Reading JPEG", 0.0)
         return self.run_decoded(load_jpeg(jpeg_path))
 
     def run_decoded(self, decoded: DecodedJpeg) -> PipelineResult:
         """The pipeline from an already-decoded JPEG (e.g. a region of one)."""
         cfg = self.config
+        # share of the whole conversion each part takes (roughly, by time)
+        work_end = 0.85 if cfg.use_invisp else 0.6
+        self._report("Network" if cfg.use_invisp else "Cleaning up", 0.05)
         srgb_u8 = (decoded.rgb * 255.0 + 0.5).astype(np.uint8)
 
         if cfg.use_invisp:
@@ -100,6 +117,7 @@ class OpenRawPipeline:
                 device=cfg.invisp_device,
                 checkpoint=cfg.invisp_checkpoint,
                 tile=cfg.invisp_tile,
+                progress=lambda f: self._report("Network", 0.05 + f * (work_end - 0.05)),
             )
             # source_srgb_u8 must match linear's possibly-cropped shape
             # (reconstruct_pseudo_raw crops to even dimensions).
@@ -116,12 +134,14 @@ class OpenRawPipeline:
                     chroma_quality_estimate=decoded.chroma_quality_estimate,
                 )
 
+            self._report("Undoing the tone curve", work_end - 0.05)
             linear = srgb_to_linear(working)
             if cfg.generic_s_curve_strength > 0:
                 linear = remove_generic_s_curve(linear, strength=cfg.generic_s_curve_strength)
             if cfg.experimental_gamut_widen > 0:
                 linear = apply_experimental_gamut_widen(linear, strength=cfg.experimental_gamut_widen)
 
+        self._report("Expanding to 16 bits", work_end)
         rgb16 = expand_to_16bit(
             linear,
             source_srgb_u8=srgb_u8,
@@ -135,6 +155,7 @@ class OpenRawPipeline:
     def run_to_dng(self, jpeg_path: str, out_path: str) -> PipelineResult:
         cfg = self.config
         result = self.run(jpeg_path)
+        self._report("Writing DNG", 0.9 if cfg.use_invisp else 0.75)
         write_linear_dng(
             out_path,
             result.rgb16,
@@ -150,4 +171,5 @@ class OpenRawPipeline:
             preview_max_dim=cfg.preview_max_dim,
             preview_quality=cfg.preview_quality,
         )
+        self._report("Done", 1.0)
         return result

@@ -139,12 +139,18 @@ TILE_MARGIN = 96
 DEFAULT_TILE = 512
 
 
-def _run_tiled(net, x, rev: bool, tile: int = DEFAULT_TILE, margin: int = TILE_MARGIN):
+def _run_tiled(net, x, rev: bool, tile: int = DEFAULT_TILE, margin: int = TILE_MARGIN, progress=None):
+    """progress: optional callable(done_fraction) after each tile."""
     torch = _require_torch()
     _, _, h, w = x.shape
     if not tile or (h <= tile and w <= tile):
-        return net(x, rev=rev)
+        out = net(x, rev=rev)
+        if progress:
+            progress(1.0)
+        return out
     out = torch.empty_like(x)
+    n = ((h + tile - 1) // tile) * ((w + tile - 1) // tile)
+    done = 0
     for y0 in range(0, h, tile):
         for x0 in range(0, w, tile):
             y1, x1 = min(y0 + tile, h), min(x0 + tile, w)
@@ -152,6 +158,9 @@ def _run_tiled(net, x, rev: bool, tile: int = DEFAULT_TILE, margin: int = TILE_M
             yb, xb = min(h, y1 + margin), min(w, x1 + margin)
             res = net(x[:, :, ya:yb, xa:xb], rev=rev)
             out[:, :, y0:y1, x0:x1] = res[:, :, y0 - ya:y0 - ya + (y1 - y0), x0 - xa:x0 - xa + (x1 - x0)]
+            done += 1
+            if progress:
+                progress(done / n)
     return out
 
 
@@ -162,8 +171,10 @@ def reconstruct_pseudo_raw(
     device: str = "cpu",
     checkpoint: str | None = None,
     tile: int = DEFAULT_TILE,
+    progress=None,
 ) -> np.ndarray:
     """
+    progress: optional callable(done_fraction), called as tiles finish.
     srgb_rgb: float32 HxWx3 in [0, 1] -- e.g. decode.load_jpeg(path).rgb directly.
     camera: one of CAMERA_CHOICES -- must match a checkpoint in pretrained_dir.
     checkpoint: path to a specific checkpoint instead (e.g. your own trained
@@ -195,7 +206,7 @@ def reconstruct_pseudo_raw(
 
     net = _load_net(camera, pretrained_dir, device, checkpoint)
     with torch.no_grad():
-        reconstructed = _run_tiled(net, tensor, rev=True, tile=tile)
+        reconstructed = _run_tiled(net, tensor, rev=True, tile=tile, progress=progress)
         reconstructed = torch.clamp(reconstructed, 0.0, 1.0)
 
     raw_gamma = reconstructed.squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.float32)

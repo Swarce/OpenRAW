@@ -108,6 +108,29 @@ jobs:
           # these tests must have RUN here -- skipping them is what this job prevents
           ! grep -qE "could not import 'torch'|needs torch installed" torch.txt
 
+  gui:
+    # The desktop app, offscreen: every theme, the queue, real conversions
+    # through the worker process, stopping mid-file.
+    name: desktop app (offscreen)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+          python -m pip install -e ".[dev,gui]"
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m pytest -q -rs tests/test_gui.py | tee gui.txt
+          ! grep -q "could not import 'PySide6" gui.txt
+
   package:
     # Build the wheel and install it into a CLEAN venv with a fresh dependency
     # resolve -- that's how the tifffile-version bug was found.
