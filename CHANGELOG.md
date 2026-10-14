@@ -3,6 +3,15 @@
 All notable changes. Development history before the first release is
 summarized; commit messages carry the full detail and measurements.
 
+## [Unreleased]
+
+### Added
+- Kaggle: live training status on Hugging Face. With `STATUS_REPO` set (and a
+  Kaggle Secret `HF_TOKEN`), each training session uploads `status.json`,
+  `eval.csv` and the last 200 log lines to a private dataset repo after every
+  evaluation and every 15 minutes, plus `STATUS.txt` and `compare.md` at the
+  end. Never interrupts training. See `docs/kaggle.md`.
+
 ## [0.1.0a1] — 2026-10-12
 
 First pre-release, with downloadable desktop app builds.

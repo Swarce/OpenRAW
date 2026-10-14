@@ -71,6 +71,22 @@ minutes of GPU quota. If it says worth it, add `"--amp"` to
 `EXTRA_TRAIN_ARGS` — for a **new** `TASK` (with `INIT_FROM`), so its scores
 aren't mixed with a float32 run's.
 
+## Live status on Hugging Face (optional)
+
+A committed run's log is only visible on Kaggle's page, with a lag. To follow a
+run from anywhere (and let tools that read Hugging Face follow it too):
+
+1. On huggingface.co → Settings → Access Tokens, create a token with **write**
+   access, and add it to the notebook as a Kaggle **Secret** named `HF_TOKEN`.
+2. Set `STATUS_REPO = "<your-hf-name>/openraw-status"` in the config cell.
+
+While training, the runner uploads to that dataset repo (created **private** if
+it doesn't exist), under `<TASK>/`: `status.json` (state, last evaluation,
+session hours, last update), `eval.csv`, `log_tail.txt` (last 200 log lines),
+and at the end of the session `STATUS.txt` and `compare.md`. It uploads after
+every `[EVAL]` line and every 15 minutes in between. If anything about it fails
+(no token, no network) it says so once in the log and training carries on.
+
 ## More data: RAISE (optional)
 
 RAISE (8,156 Nikon raws; **non-commercial research use only**, see

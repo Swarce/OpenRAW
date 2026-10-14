@@ -374,9 +374,24 @@ def choose_gpus(gpus: int, env: dict) -> tuple[int, dict]:
     return 1, env
 
 
+def _call_teed(cmd, cwd, env, sink) -> int:
+    """subprocess.call, but every output line also goes to sink(line) -- for
+    the live status. Output still appears in Kaggle's log as it comes."""
+    p = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, bufsize=1, errors="replace")
+    for line in p.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        try:
+            sink(line)
+        except Exception:  # noqa: BLE001 -- status must never stop training
+            pass
+    return p.wait()
+
+
 def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hours: float | None = None,
           workers: int = 3, extra_args: list[str] | None = None, session_start: float | None = None,
-          gpus: int = 0) -> int:
+          gpus: int = 0, sink=None) -> int:
     """Run train.py on all cameras in data_root, resuming if a checkpoint is in
     the output folder, within the remaining session time. gpus: 0 = every GPU
     the session has (both on "GPU T4 x2"), after a communication self-test.
@@ -405,6 +420,8 @@ def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hour
         log(f"{n} training pairs -> {epochs} epochs (~{n * epochs:,} steps); {n_gpus} GPU(s); "
             f"time budget {limit:.2f} h; {'resuming' if resume else 'fresh start'}")
         log(" ".join(cmd))
+        if sink is not None:
+            return _call_teed(cmd, str(REPO), env, sink)
         return subprocess.call(cmd, cwd=str(REPO), env=env)
 
     code = run_once(gpus)
@@ -468,7 +485,7 @@ def write_status(task: str, epochs: int) -> str:
 # ---------------------------------------------------------------------- main
 def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, session_start=None,
         extra_train_args=None, gpus=0, raise_csv=None, raise_cameras=(), raise_start=0, compare_only=False,
-        init_from=None, amp_check_only=False):
+        init_from=None, amp_check_only=False, status_repo=None):
     """raise_csv: prepare RAISE instead of FiveK or training -- a path, or True
     to use the CSV with a NEF column among the attached inputs.
     compare_only: don't train; score the checkpoints on the held-out test
@@ -476,7 +493,10 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
     init_from: when `task` has no checkpoint yet, start it from another run's
     weights -- that run's TASK name (its output attached) or a .pth path.
     amp_check_only: don't train; measure whether mixed precision (--amp) is
-    faster on this GPU and what it costs in accuracy (tools/amp_check.py)."""
+    faster on this GPU and what it costs in accuracy (tools/amp_check.py).
+    status_repo: a Hugging Face dataset repo ("user/name", created private if
+    missing) that receives live training status while this session trains --
+    see status_publish.py. Needs a Kaggle Secret HF_TOKEN with write access."""
     session_start = session_start or time.time()
     for a in attached_inputs(INPUT):
         log(f"input: {a}")
@@ -537,8 +557,20 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
         log(f"new run {task!r} starting from the weights in {src}")
     n = count_train_pairs(data_root)
     epochs = epochs or suggest_epochs(n)
+    pub = None
+    if status_repo:
+        from status_publish import StatusPublisher, hf_token
+        pub = StatusPublisher(status_repo, task, WORKING / "exps" / task, token=hf_token(), log=log,
+                              session_start=session_start).start()
+        if not pub.enabled:
+            pub = None
     code = train(task, data_root, epochs=epochs, workers=workers, session_start=session_start,
-                 extra_args=extra_train_args, gpus=gpus)
-    write_status(task, epochs)
+                 extra_args=extra_train_args, gpus=gpus, sink=pub.feed if pub else None)
+    status = write_status(task, epochs)
+    if pub:
+        pub.state = "comparing models"
+        pub.publish()
     compare(task, data_root)  # a minute or two on a GPU; leaves compare/compare.md in the output
+    if pub:
+        pub.finish(("session finished: " + status) if code == 0 else f"train.py exited with code {code}")
     return "trained" if code == 0 else f"train.py exited with code {code}"

@@ -243,3 +243,68 @@ def test_unrecognised_input_layout_is_printed_when_cameras_are_missing(kaggle, m
     out = capsys.readouterr().out
     assert "input fivek-odd contains no prepared data" in out and "pairs.zip" in out
     assert "input prev contains no prepared data the runner recognises (it holds a run's output" in out
+
+
+# ------------------------------------------------------- live status (Hugging Face)
+class _FakeApi:
+    def __init__(self, fail_after=None):
+        self.repos, self.commits, self.fail_after = [], [], fail_after
+
+    def create_repo(self, repo_id, repo_type, private, exist_ok):
+        self.repos.append((repo_id, repo_type, private))
+
+    def create_commit(self, repo_id, repo_type, operations, commit_message):
+        if self.fail_after is not None and len(self.commits) >= self.fail_after:
+            raise RuntimeError("network down")
+        files = {}
+        for op in operations:
+            path, data = (op if isinstance(op, tuple) else (op.path_in_repo, op.path_or_fileobj))
+            files[path] = data
+        self.commits.append((commit_message, files))
+
+
+def test_status_publisher_uploads_eval_and_log(tmp_path):
+    import status_publish as sp
+    run = tmp_path / "working" / "exps" / "t"
+    run.mkdir(parents=True)
+    (run / "eval.csv").write_text("epoch,step,raw_psnr,rgb_psnr\n2,2889,38.51,35.25\n")
+    api = _FakeApi()
+    pub = sp.StatusPublisher("me/status", "t", run, api=api, heartbeat_s=3600, log=lambda *a: None).start()
+    assert api.repos == [("me/status", "dataset", True)]  # private dataset repo
+    pub.feed("[train] step 100\n")
+    pub.feed("[EVAL] epoch 2 (EMA): raw PSNR 38.51 dB\n")  # an evaluation publishes at once
+    t = __import__("time").time()
+    while len(api.commits) < 2 and __import__("time").time() - t < 5:
+        __import__("time").sleep(0.02)
+    (tmp_path / "working" / "STATUS.txt").write_text("RUN AGAIN to continue: 3/40 epochs\n")
+    pub.finish("session finished")
+    files = api.commits[-1][1]
+    status = __import__("json").loads(files["t/status.json"])
+    assert status["state"] == "session finished" and "38.51" in status["last_eval"]
+    assert b"38.51" in files["t/eval.csv"] and b"step 100" in files["t/log_tail.txt"]
+    assert b"RUN AGAIN" in files["t/STATUS.txt"]
+    assert len(api.commits) >= 3  # start, after the eval, final
+
+
+def test_status_failure_never_stops_training(tmp_path):
+    import status_publish as sp
+    msgs = []
+    pub = sp.StatusPublisher("me/status", "t", tmp_path, api=_FakeApi(fail_after=0), log=msgs.append)
+    pub.start()
+    assert not pub.enabled and any("upload failed" in m for m in msgs)
+    pub.feed("[EVAL] x\n")
+    pub.finish("done")  # no exception
+
+
+def test_train_tees_output_to_the_status_sink(kaggle, monkeypatch):
+    kr.prepare("all", budget_gb=5)
+    data = kaggle / "working" / kr.DATA_DIR
+    monkeypatch.setattr(kr, "_gpu_count", lambda: 1)
+    script = kaggle / "fake_train.py"
+    script.write_text("print('[EVAL] epoch 0: raw PSNR 30.00 dB')\n")
+    real_popen = kr.subprocess.Popen
+    monkeypatch.setattr(kr.subprocess, "Popen",
+                        lambda cmd, **kw: real_popen([__import__("sys").executable, str(script)], **kw))
+    seen = []
+    assert kr.train("t", data, epochs=1, sink=seen.append) == 0
+    assert any("[EVAL]" in s for s in seen)
