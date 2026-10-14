@@ -102,10 +102,17 @@ def _load_net(camera: str, pretrained_dir: str, device, checkpoint: str | None =
         state_dict = torch.load(ckpt_path, map_location=device, weights_only=False)  # also train.py's dicts
     except TypeError:  # torch < 1.13
         state_dict = torch.load(ckpt_path, map_location=device)
+    from . import conditioning
+    meta = None
     if isinstance(state_dict, dict) and "net" in state_dict and "optimizer" in state_dict:
         # train.py's full-state latest_state.pth: the weight average if it has
         # one (what latest.pth holds too), else the live weights
+        meta = state_dict.get(conditioning.META_KEY)
         state_dict = state_dict.get("ema") or state_dict["net"]
+    # per-camera adapters / EXIF conditioning (openraw/conditioning.py), if the
+    # checkpoint was trained with them: build the same network
+    state_dict, meta2 = conditioning.split_meta(state_dict)
+    conditioning.attach_from_meta(net, meta2 or meta)
     # strict=False only to tolerate upstream's checkpoints, which carry 16
     # leftover 'actnorm' entries from a layer the released model doesn't use.
     # Anything MISSING is an error: strict=False alone loaded nothing at all
@@ -137,6 +144,20 @@ def _load_net(camera: str, pretrained_dir: str, device, checkpoint: str | None =
 RECEPTIVE_RADIUS = 80
 TILE_MARGIN = 96
 DEFAULT_TILE = 512
+
+
+def _condition(net, camera_params: dict | None) -> str | None:
+    """Point a conditioned network at this photo's camera and settings.
+    Returns a note on what was used (None for plain InvISP checkpoints)."""
+    from . import conditioning
+    from .camera_params import as_vector
+    c = conditioning.get(net)
+    if c is None:
+        return None
+    p = camera_params or {}
+    cam = conditioning.match_camera(c.cameras, p.get("make"), p.get("model")) if c.lora_rank else -1
+    c.set_context([cam], [as_vector(p)])
+    return (f"adapter {c.cameras[cam]}" if cam >= 0 else "shared network") if c.lora_rank else None
 
 
 def _run_tiled(net, x, rev: bool, tile: int = DEFAULT_TILE, margin: int = TILE_MARGIN, progress=None):
@@ -172,9 +193,14 @@ def reconstruct_pseudo_raw(
     checkpoint: str | None = None,
     tile: int = DEFAULT_TILE,
     progress=None,
+    camera_params: dict | None = None,
 ) -> np.ndarray:
     """
     progress: optional callable(done_fraction), called as tiles finish.
+    camera_params: the photo's EXIF settings (openraw.camera_params: make,
+        model, exposure_time, f_number, iso, focal_length). Used only by
+        checkpoints trained with per-camera adapters or EXIF conditioning;
+        ignored by the others. None = unknown.
     srgb_rgb: float32 HxWx3 in [0, 1] -- e.g. decode.load_jpeg(path).rgb directly.
     camera: one of CAMERA_CHOICES -- must match a checkpoint in pretrained_dir.
     checkpoint: path to a specific checkpoint instead (e.g. your own trained
@@ -205,6 +231,7 @@ def reconstruct_pseudo_raw(
     tensor = torch.from_numpy(srgb_rgb).permute(2, 0, 1).unsqueeze(0).float().to(device)
 
     net = _load_net(camera, pretrained_dir, device, checkpoint)
+    _condition(net, camera_params)
     with torch.no_grad():
         reconstructed = _run_tiled(net, tensor, rev=True, tile=tile, progress=progress)
         reconstructed = torch.clamp(reconstructed, 0.0, 1.0)

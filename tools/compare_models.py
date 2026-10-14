@@ -61,17 +61,24 @@ def build_eval_set(data_path: str, eval_images: int = 40, eval_crop: int = 512, 
     return torch.utils.data.Subset(test_set, idx), [_camera_of(p) for p in paths], cams
 
 
-def score(checkpoint: str, subset, device) -> list[tuple[float, float]]:
-    """Per image (raw PSNR, rgb PSNR) for one checkpoint."""
+def score(checkpoint: str, subset, device, item_cameras=None) -> list[tuple[float, float]]:
+    """Per image (raw PSNR, rgb PSNR) for one checkpoint. item_cameras: each
+    image's camera folder, for checkpoints with per-camera adapters (matched
+    by name; a camera the checkpoint wasn't trained on uses the shared network)."""
     import torch
     import train
+    from openraw import conditioning
     from openraw.invisp_bridge import _load_net
     net = _load_net("", "", device, checkpoint=checkpoint)
     net.eval()
+    cond = conditioning.get(net)
     out = []
     with torch.no_grad():
         for i in range(len(subset)):
             b = subset[i]
+            if cond is not None:
+                cam = item_cameras[i] if item_cameras else None
+                cond.set_context([cond.cameras.index(cam) if cam in cond.cameras else -1], b["params"][None])
             raw, rgb = b["input_raw"][None].to(device), b["target_rgb"][None].to(device)
             out.append((train._psnr(net(rgb, rev=True), raw), train._psnr(net(raw), rgb)))
     return out
@@ -131,7 +138,7 @@ def main(argv=None) -> int:
     for f in files:
         t = time.time()
         try:
-            results[names[f]] = score(f, subset, device)
+            results[names[f]] = score(f, subset, device, cameras)
         except Exception as e:  # noqa: BLE001  -- one unloadable file shouldn't lose the others
             print(f"[compare] {names[f]}: skipped ({type(e).__name__}: {e})", flush=True)
             continue

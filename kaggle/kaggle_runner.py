@@ -24,6 +24,7 @@ Paths come from environment variables so the logic is testable off Kaggle.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -433,6 +434,41 @@ def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hour
     return code
 
 
+def ensure_camera_params(data_root: Path, extra_args=None, root: Path = None, out: Path = None) -> Path | None:
+    """For train.py --exif_cond: make sure <data_root>/camera_params.json lists
+    the camera settings of every training pair. Pairs prepared before the
+    settings were stored need data/camera_params.py, which reads them from the
+    first few KB of each raw file online (a few minutes). The table is copied
+    to the output, so attaching this session's output to the next one skips
+    the fetching. Returns the table, or None when --exif_cond isn't used."""
+    if "--exif_cond" not in (extra_args or []):
+        return None
+    root, out = Path(root or INPUT), Path(out or WORKING)
+    table = Path(data_root) / "camera_params.json"
+    merged = {}
+    for depth in ("*/camera_params.json", "*/*/camera_params.json"):  # from an earlier session's output
+        for p in sorted(root.glob(depth)):
+            try:
+                merged.update(json.loads(p.read_text()))
+            except (OSError, ValueError):
+                pass
+    if merged:
+        table.write_text(json.dumps(merged))
+        log(f"camera settings for {len(merged)} pairs from an earlier session")
+    cmd = [sys.executable, str(REPO / "data" / "camera_params.py"), "--data-path", str(data_root) + "/"]
+    csv_path = find_raise_csv(root)
+    if csv_path:
+        cmd += ["--raise-csv", str(csv_path)]
+    try:
+        _call(cmd, str(REPO), dict(os.environ, PYTHONUNBUFFERED="1"))
+    except Exception as e:  # noqa: BLE001 -- training still runs, settings unknown
+        log(f"reading camera settings failed: {e}")
+    if table.is_file():
+        shutil.copy2(table, out / "camera_params.json")
+        return table
+    return None
+
+
 def compare(task: str, data_root: Path, out: Path = None, extra: list | None = None) -> int:
     """Score the repo's pretrained/*.pth, this task's best.pth / latest.pth and
     any attached checkpoints on the held-out test images (tools/compare_models.py)
@@ -557,6 +593,7 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
             raise SystemExit(f"INIT_FROM = {init_from!r}: no checkpoint found. Attach that run's output "
                              f"(it contains exps/{init_from}/checkpoint/best.pth), or give a .pth path.")
         log(f"new run {task!r} starting from the weights in {src}")
+    ensure_camera_params(data_root, extra_train_args)
     n = count_train_pairs(data_root)
     epochs = epochs or suggest_epochs(n)
     pub = None

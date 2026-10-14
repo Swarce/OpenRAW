@@ -109,6 +109,7 @@ class OpenRawPipeline:
             # for exactly what this does and doesn't reproduce from
             # upstream, and for the (untested-in-this-environment) caveat.
             from .invisp_bridge import reconstruct_pseudo_raw
+            from . import camera_params
 
             linear = reconstruct_pseudo_raw(
                 decoded.rgb,
@@ -118,6 +119,9 @@ class OpenRawPipeline:
                 checkpoint=cfg.invisp_checkpoint,
                 tile=cfg.invisp_tile,
                 progress=lambda f: self._report("Network", 0.05 + f * (work_end - 0.05)),
+                # camera and settings, for checkpoints trained with per-camera
+                # adapters / EXIF conditioning (ignored by the others)
+                camera_params=camera_params.from_exif_fields(decoded.exif_fields),
             )
             # source_srgb_u8 must match linear's possibly-cropped shape
             # (reconstruct_pseudo_raw crops to even dimensions).

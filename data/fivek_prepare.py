@@ -166,7 +166,12 @@ def preprocess_one(dng: str, raw_dir: str, rgb_dir: str, delete_dng: bool = Fals
         tmp_j = jpg.with_suffix(".part.jpg")
         Image.fromarray(rgb).save(tmp_j, quality=JPEG_QUALITY, subsampling=1)
         tmp_n = npz.with_suffix(".part.npz")
-        np.savez(tmp_n, **mosaic_store.pack(mosaic, pattern, white, wb))
+        packed = mosaic_store.pack(mosaic, pattern, white, wb)
+        # exposure time, f-number, ISO, focal length (NaN = unknown), for EXIF
+        # conditioning (train.py --exif_cond; openraw/camera_params.py)
+        from openraw import camera_params
+        packed["camera_params"] = np.asarray(camera_params.as_vector(camera_params.from_file(dng)), np.float32)
+        np.savez(tmp_n, **packed)
         os.replace(tmp_j, jpg)
         os.replace(tmp_n, npz)  # npz last: its presence marks the pair complete
         if delete_dng:

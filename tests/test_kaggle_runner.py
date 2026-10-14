@@ -317,3 +317,26 @@ def test_child_output_is_streamed_once_through_python(capfd):
     code = kr._call([_sys.executable, "-c", "print('hello from child')"])
     out = capfd.readouterr().out
     assert code == 0 and out.count("hello from child") == 1
+
+
+def test_exif_cond_reads_camera_settings_and_keeps_them_for_next_session(tmp_path, monkeypatch):
+    """With --exif_cond the runner fills <data>/camera_params.json (reusing an
+    earlier session's table) and copies it to the output; without, nothing."""
+    data, inp, out = tmp_path / "data", tmp_path / "input", tmp_path / "working"
+    for d in (data, inp / "prev-run", out):
+        d.mkdir(parents=True)
+    (inp / "prev-run" / "camera_params.json").write_text(json.dumps({"CAM/a": [0.01, 4.0, 100, 50]}))
+    calls = []
+
+    def fake_call(cmd, cwd=None, env=None, sink=None):
+        calls.append(cmd)
+        t = json.loads((data / "camera_params.json").read_text())
+        t["CAM/b"] = [None, None, 200, None]
+        (data / "camera_params.json").write_text(json.dumps(t))
+        return 0
+    monkeypatch.setattr(kr, "_call", fake_call)
+    assert kr.ensure_camera_params(data, ["--amp"], root=inp, out=out) is None and not calls
+    table = kr.ensure_camera_params(data, ["--exif_cond"], root=inp, out=out)
+    assert calls and calls[0][1].endswith("camera_params.py")
+    saved = json.loads((out / "camera_params.json").read_text())
+    assert table == data / "camera_params.json" and set(saved) == {"CAM/a", "CAM/b"}

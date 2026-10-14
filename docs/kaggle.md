@@ -71,6 +71,29 @@ minutes of GPU quota. If it says worth it, add `"--amp"` to
 `EXTRA_TRAIN_ARGS` — for a **new** `TASK` (with `INIT_FROM`), so its scores
 aren't mixed with a float32 run's.
 
+## Trying the paper-inspired additions (optional)
+
+`train.py` has four optional additions, all off by default: an edit-aware
+loss, photo-finishing augmentation, per-camera adapters and EXIF
+conditioning. [training.md](training.md#optional-additions-from-recent-papers)
+explains each one and credits its paper. Try them as **new** tasks, so their
+scores stay separate and `compare.md` can put them next to the plain run:
+
+- A full run with the extra losses:
+  `TASK = "openraw-fivek-edit"`,
+  `EXTRA_TRAIN_ARGS = ["--amp", "--eval_every", "3", "--edit_loss", "1", "--finish_aug", "0.5"]`.
+- A cheap fine-tune that adds adapters and EXIF conditioning to a finished
+  model:
+  `TASK = "openraw-fivek-cond"`, `INIT_FROM = "openraw-fivek"` (attach its
+  output),
+  `EXTRA_TRAIN_ARGS = ["--amp", "--cam_lora", "4", "--exif_cond", "--train_new_only"]`.
+
+With `--exif_cond`, the runner first reads each training photo's camera
+settings. It fetches the first 64 KB of each original raw file, which takes a
+few minutes and needs Internet on (it is on by default). It saves them as
+`camera_params.json` in the output. Attach that output next session and the
+fetching is skipped. For RAISE folders it uses the attached RAISE CSV.
+
 ## Live status on Hugging Face (optional)
 
 A committed run's log is only visible on Kaggle's page, with a lag. To follow a

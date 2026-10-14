@@ -18,6 +18,8 @@ from dataset.FiveK_dataset import FiveKDatasetTrain, FiveKDatasetTest
 from config.config import get_arguments
 
 from openraw.third_party.invisp.utils.JPEG import DiffJPEG
+from openraw import conditioning as cond_mod  # PATCHED (OpenRAW): optional adapters / EXIF conditioning
+from openraw import train_losses  # PATCHED (OpenRAW): optional edit-aware loss / finishing augmentation
 
 
 def _fivek_prepare():
@@ -113,6 +115,37 @@ if __name__ == "__main__":
                         help="gradient checkpointing: recompute each block's activations in the backward pass instead "
                              "of storing them. A 256 px step needs ~6.2 GB without it, ~2.5 GB with it, for ~30-40%% "
                              "extra compute; results are identical. auto: on unless the GPU has >= 12 GB.")
+    # PATCHED (OpenRAW): optional additions from recent papers -- all off by
+    # default; see docs/training.md "Optional additions" and NOTICE.md.
+    parser.add_argument("--edit_loss", type=float, default=0.0,
+                        help="weight of the edit-aware loss (Punnappurath et al., CVPR 2026): predicted and true "
+                             "raw rendered through the same random edit (exposure, white balance, saturation, "
+                             "contrast) and compared. 0 = off; try 1")
+    parser.add_argument("--edit_sigma", type=float, default=0.75,
+                        help="spread of the edit-aware loss's random exposure, in stops (paper: 0.75)")
+    parser.add_argument("--finish_aug", type=float, default=0.0,
+                        help="weight of the photo-finishing augmentation (after RawGen, ECCV 2026): the JPEG with a "
+                             "random tone/contrast/saturation finish must still invert to the same raw. 0 = off; "
+                             "try 0.5")
+    parser.add_argument("--finish_prob", type=float, default=0.5,
+                        help="share of steps that run the finishing augmentation (each costs one more inverse pass)")
+    parser.add_argument("--cam_lora", type=int, default=0,
+                        help="per-camera low-rank adapters of this rank (after SpiralDiff's CamLoRA, CVPR 2026); "
+                             "chosen at conversion time from the JPEG's EXIF Make/Model. 0 = off; try 4")
+    parser.add_argument("--cam_dropout", type=float, default=0.2,
+                        help="with --cam_lora: share of samples trained without their adapter, so the shared "
+                             "network stays good for cameras it never saw")
+    parser.add_argument("--exif_cond", action="store_true",
+                        help="condition on the photo's exposure time, f-number, ISO and focal length (after "
+                             "ParamISP, CVPR 2024). Needs camera settings for the training pairs: newly prepared "
+                             "ones have them, older ones need data/camera_params.py")
+    parser.add_argument("--param_dropout", type=float, default=0.2,
+                        help="with --exif_cond: chance of hiding each setting during training (as ParamISP)")
+    parser.add_argument("--camera_params", type=str, default=None,
+                        help="camera settings table from data/camera_params.py (default: <data_path>/camera_params.json)")
+    parser.add_argument("--train_new_only", action="store_true",
+                        help="train only the added adapters / EXIF conditioning, keeping InvISP's own weights "
+                             "fixed: a cheap fine-tune of an existing model (e.g. Kaggle INIT_FROM)")
     args = parser.parse_args()
     print("Parsed arguments: {}".format(args))
 
@@ -200,6 +233,52 @@ def _psnr(a, b):
     return 99.0 if mse == 0 else 10 * float(np.log10(1.0 / mse))
 
 
+def build_net(args, device):
+    """PATCHED (OpenRAW): InvISP, plus per-camera adapters / EXIF conditioning
+    when asked for (openraw/conditioning.py). Training and evaluation networks
+    must be built the same way."""
+    net = InvISPNet(channel_in=3, channel_out=3, block_num=getattr(args, "blocks", 8)).to(device)
+    cams = args.camera if isinstance(args.camera, (list, tuple)) else \
+        [c.strip() for c in str(args.camera or "").split(",") if c.strip()]
+    cond_mod.attach(net, cams, getattr(args, "cam_lora", 0) or 0, bool(getattr(args, "exif_cond", False)))
+    return net
+
+
+def _set_context(net, batch, device, cam_dropout=0.0, param_dropout=0.0):
+    """Hand the batch's camera / EXIF settings to the conditioning, if the net has any."""
+    c = cond_mod.get(net)
+    if c is None:
+        return
+    ids = batch.get("camera") if c.lora_rank > 0 else None
+    if ids is not None:
+        ids = torch.as_tensor(ids, dtype=torch.long).clone()
+        if cam_dropout > 0:
+            ids[torch.rand(ids.shape) < cam_dropout] = -1
+    params = batch.get("params") if c.exif else None
+    c.set_context(ids, params, param_dropout)
+
+
+def load_weights(net, state_dict, log=print):
+    """PATCHED (OpenRAW): load weights into a network that may have more parts
+    than the checkpoint (adapters / EXIF conditioning added to an existing
+    model start as 'no change'). Anything else missing or extra is an error."""
+    state_dict, meta = cond_mod.split_meta(state_dict)
+    c = cond_mod.get(net)
+    if meta and c is not None and meta.get("cameras") and meta.get("cameras") != c.cameras:
+        state_dict = cond_mod.remap_cameras(state_dict, meta.get("cameras", []), c.cameras)
+    res = net.load_state_dict(state_dict, strict=False)
+    new = [k for k in res.missing_keys if k.startswith(cond_mod.PREFIX)]
+    missing = [k for k in res.missing_keys if not k.startswith(cond_mod.PREFIX)]
+    unexpected = [k for k in res.unexpected_keys if ".actnorm." not in k]
+    if missing or unexpected:
+        hint = (f" The checkpoint has {cond_mod.describe(meta)}: train with the same --cam_lora / --exif_cond."
+                if meta and unexpected else "")
+        raise SystemExit(f"checkpoint doesn't match the network: {len(missing)} missing, {len(unexpected)} "
+                         f"unexpected weights (e.g. {(missing or unexpected)[0]}).{hint}")
+    if new:
+        log(f"[INFO] {len(new)} added weights (adapters / EXIF conditioning) start untrained, as 'no change'")
+
+
 def evaluate(net, loader, device):
     """PATCHED (OpenRAW): held-out evaluation, absent upstream (it evaluated in
     separate scripts after training). Returns mean PSNRs over the test crops:
@@ -211,6 +290,7 @@ def evaluate(net, loader, device):
     raw_p, rgb_p = [], []
     with torch.no_grad():
         for b in loader:
+            _set_context(net, b, device)
             raw, rgb = b["input_raw"].to(device), b["target_rgb"].to(device)
             rgb_p.append(_psnr(net(raw), rgb))
             raw_p.append(_psnr(net(rgb, rev=True), raw))
@@ -374,7 +454,11 @@ def main(args, rank=0, world=1):
     ckpt = args.out_path + "%s/checkpoint/" % args.task
     os.makedirs(ckpt, exist_ok=True)
     # ======================================define the model======================================
-    net = InvISPNet(channel_in=3, channel_out=3, block_num=getattr(args, "blocks", 8)).to(device)
+    net = build_net(args, device)
+    cond = cond_mod.get(net)
+    if cond is not None:
+        print(f"[INFO] conditioning: {cond_mod.describe(cond.meta())} "
+              f"({sum(p.numel() for p in cond_mod.conditioned_parameters(net)):,} extra weights)")
     jpeg = DiffJPEG if isinstance(DiffJPEG, torch.nn.Module) else DiffJPEG(differentiable=True, quality=90)
     jpeg = jpeg.to(device)
     gpu_gb = torch.cuda.get_device_properties(device).total_memory / 2**30 if device.type == "cuda" else None
@@ -391,7 +475,21 @@ def main(args, rank=0, world=1):
         _enable_checkpointing(net)
     print(f"[INFO] gradient checkpointing: {'on' if use_ckpt else 'off'}"
           + (f" (GPU {gpu_gb:.1f} GB; a 256 px step needs ~6.2 GB without it, ~2.5 GB with it)" if gpu_gb else ""))
-    optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
+    trainable = list(net.parameters())
+    if getattr(args, "train_new_only", False):
+        if cond is None:
+            raise SystemExit("--train_new_only: nothing new to train (add --cam_lora and/or --exif_cond)")
+        for n_, p_ in net.named_parameters():
+            p_.requires_grad_(n_.startswith(cond_mod.PREFIX))
+        trainable = cond_mod.conditioned_parameters(net)
+        print(f"[INFO] training only the added weights; InvISP's {sum(p.numel() for p in net.parameters()) - sum(p.numel() for p in trainable):,} stay fixed")
+    edit_w, finish_w = float(getattr(args, "edit_loss", 0) or 0), float(getattr(args, "finish_aug", 0) or 0)
+    if edit_w:
+        print(f"[INFO] edit-aware loss, weight {edit_w}, exposure spread {args.edit_sigma} stops "
+              f"(Punnappurath et al., CVPR 2026)")
+    if finish_w:
+        print(f"[INFO] photo-finishing augmentation, weight {finish_w}, on {args.finish_prob:.0%} of steps (after RawGen)")
+    optimizer = torch.optim.Adam(trainable, lr=args.lr)
     # PATCHED (OpenRAW): upstream's LR drops at epochs 50 and 80 of 300 were
     # tuned for ONE camera (~650 images, ~195k steps). They now scale with
     # --epochs, so the drops land at the same fraction of training whatever
@@ -403,14 +501,19 @@ def main(args, rank=0, world=1):
     if args.resume:
         if os.path.exists(ckpt + "latest_state.pth"):
             st = _load(ckpt + "latest_state.pth", device)
-            net.load_state_dict(st["net"])
+            try:
+                net.load_state_dict(st["net"])
+            except RuntimeError as e:
+                raise SystemExit(f"--resume: {ckpt}latest_state.pth was made with different settings "
+                                 f"(its conditioning: {cond_mod.describe(st.get(cond_mod.META_KEY))}). Use the same "
+                                 f"--cam_lora / --exif_cond, or start a new TASK from it (INIT_FROM).\n{e}")
             optimizer.load_state_dict(st["optimizer"])
             scheduler.load_state_dict(st["scheduler"])
             start_epoch, step = st["epoch"] + 1, st["step"]
             print(f"[INFO] resumed from {ckpt}latest_state.pth: continuing at epoch {start_epoch}, step {step}")
         elif os.path.exists(ckpt + "latest.pth"):
             # weights-only checkpoint (upstream format / runs started before full-state saves)
-            net.load_state_dict(_load(ckpt + "latest.pth", device))
+            load_weights(net, _load(ckpt + "latest.pth", device))
             start_epoch = args.start_epoch or 0
             for _ in range(start_epoch):  # fast-forward the LR schedule to where training was
                 scheduler.step()
@@ -433,13 +536,13 @@ def main(args, rank=0, world=1):
         ema = _EMA(net, args.ema, st.get("ema"), st.get("ema_updates", 0))
         # evaluated in a separate network built from scratch -- not a deepcopy of
         # `net`, whose checkpointed forward closures would still point at `net`
-        eval_net = InvISPNet(channel_in=3, channel_out=3, block_num=getattr(args, "blocks", 8)).to(device)
+        eval_net = build_net(args, device)
         print(f"[INFO] weight averaging (EMA) decay {args.ema}: evaluation and saved weights use the average"
               + (" (continuing the saved average)" if st.get("ema") is not None else
                  " (starting from the current weights)" if args.resume else ""))
     elif rank == 0 and use_amp:
         # evaluation always runs in full precision, so scores stay comparable
-        eval_net = InvISPNet(channel_in=3, channel_out=3, block_num=getattr(args, "blocks", 8)).to(device)
+        eval_net = build_net(args, device)
 
     print("[INFO] Start data loading and preprocessing")
     RAWDataset = FiveKDatasetTrain(opt=args)
@@ -493,9 +596,10 @@ def main(args, rank=0, world=1):
 
     print("[INFO] Start to train")
     run_start, epochs_done, start_step = time.time(), 0, step
-    weights = (lambda: ema.state_dict()) if ema is not None else net.state_dict  # what gets saved for inference
+    # what gets saved for inference (+ a description of any conditioning, for loaders)
+    weights = (lambda: cond_mod.with_meta(ema.state_dict() if ema is not None else net.state_dict(), net))
     log_every = max(1, getattr(args, "log_every", 50) or 1)
-    params = list(net.parameters())
+    params = trainable
     for epoch in range(start_epoch, args.epochs):
         if sampler is not None:
             sampler.set_epoch(epoch)  # a different shuffle each epoch, the same on every process
@@ -503,8 +607,8 @@ def main(args, rank=0, world=1):
         data_t0 = time.time()
         # running sums for --log_every: kept on the device and only read when a
         # line is printed, so steps between log lines don't wait on a GPU sync
-        win = torch.zeros(3, device=device); win_n = 0; win_data = win_compute = 0.0
-        ep_sum = torch.zeros(3, device=device); ep_n = 0
+        win = torch.zeros(5, device=device); win_n = 0; win_data = win_compute = 0.0
+        ep_sum = torch.zeros(5, device=device); ep_n = 0
         for i_batch, sample_batched in enumerate(dataloader):
             data_time = time.time() - data_t0  # waiting for the loader -- upstream didn't count this
             step_time = time.time()
@@ -513,6 +617,9 @@ def main(args, rank=0, world=1):
                                              sample_batched['target_rgb'].to(device, non_blocking=True),
                                              sample_batched['target_raw'].to(device, non_blocking=True))
 
+            if cond is not None:
+                _set_context(net, sample_batched, device, getattr(args, "cam_dropout", 0.0),
+                             getattr(args, "param_dropout", 0.0))
             reconstruct_rgb = net(input)
             reconstruct_rgb = torch.clamp(reconstruct_rgb, 0, 1)
             rgb_loss = F.l1_loss(reconstruct_rgb, target_rgb)
@@ -521,6 +628,15 @@ def main(args, rank=0, world=1):
             raw_loss = F.l1_loss(reconstruct_raw, target_raw)
 
             loss = args.rgb_weight * rgb_loss + raw_loss
+            # PATCHED (OpenRAW): optional extra objectives (openraw/train_losses.py)
+            edit_l = finish_l = torch.zeros((), device=device)
+            if edit_w:
+                edit_l = train_losses.edit_aware_loss(reconstruct_raw, target_raw, bool(args.gamma), args.edit_sigma)
+                loss = loss + edit_w * edit_l
+            if finish_w and random.random() < args.finish_prob:
+                finished = train_losses.apply_finish(target_rgb, train_losses.sample_finish(target_rgb.shape[0], device))
+                finish_l = F.l1_loss(net(finished, rev=True), target_raw)
+                loss = loss + finish_w * finish_l
 
             optimizer.zero_grad()
             scaler.scale(loss).backward()
@@ -533,14 +649,16 @@ def main(args, rank=0, world=1):
             if ema is not None:
                 ema.update()
 
-            losses = torch.stack([loss.detach(), raw_loss.detach(), rgb_loss.detach()])
+            losses = torch.stack([loss.detach(), raw_loss.detach(), rgb_loss.detach(), edit_l.detach(),
+                                  finish_l.detach()])
             win += losses; ep_sum += losses; win_n += 1; ep_n += 1
             win_data += data_time; win_compute += time.time() - step_time
             last_in_epoch = i_batch == len(dataloader) - 1
             if win_n >= log_every or step == start_step or last_in_epoch:
-                l, r, g = (win / win_n).tolist()
-                print("task: %s Epoch: %d Step: %d || loss: %.5f raw_loss: %.5f rgb_loss: %.5f || lr: %f || data %.3fs compute %.3fs%s" % (
-                    args.task, epoch, step, l, r, g, optimizer.param_groups[0]['lr'], win_data / win_n,
+                l, r, g, el, fl = (win / win_n).tolist()
+                extra = (f" edit_loss: {el:.5f}" if edit_w else "") + (f" finish_loss: {fl:.5f}" if finish_w else "")
+                print("task: %s Epoch: %d Step: %d || loss: %.5f raw_loss: %.5f rgb_loss: %.5f%s || lr: %f || data %.3fs compute %.3fs%s" % (
+                    args.task, epoch, step, l, r, g, extra, optimizer.param_groups[0]['lr'], win_data / win_n,
                     win_compute / win_n, f" (mean of {win_n} steps)" if win_n > 1 else ""))
                 win.zero_(); win_n = 0; win_data = win_compute = 0.0
             if step == start_step and device.type == "cuda":
@@ -562,7 +680,7 @@ def main(args, rank=0, world=1):
         if eval_loader is not None and ((epoch + 1) % eval_every == 0 or epoch == args.epochs - 1):
             t_eval = time.time()
             if eval_net is not net:
-                eval_net.load_state_dict(ema.state_dict() if ema is not None else net.state_dict())
+                eval_net.load_state_dict(ema.state_dict() if ema is not None else net.state_dict())  # (no meta key: plain dicts)
             raw_psnr, rgb_psnr = evaluate(eval_net, eval_loader, device)
             is_best = raw_psnr > best_raw
             if is_best:
@@ -583,6 +701,7 @@ def main(args, rank=0, world=1):
         _save(weights(), ckpt + "latest.pth")
         _save({"net": net.state_dict(), "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
                "epoch": epoch, "step": step, "best_raw_psnr": best_raw,
+               **({cond_mod.META_KEY: cond.meta()} if cond is not None else {}),
                **({"ema": ema.state_dict(), "ema_updates": ema.updates} if ema is not None else {})},
               ckpt + "latest_state.pth")
         if (epoch + 1) % 10 == 0:

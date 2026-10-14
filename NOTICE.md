@@ -107,6 +107,98 @@ No source from Invertible-Image-Rescaling was directly vendored here —
 only InvISP's own code (which already incorporates/adapts that design)
 was pulled in.
 
+## Ideas from other papers: implemented, not vendored
+
+The optional training additions in `openraw/conditioning.py`,
+`openraw/train_losses.py`, `openraw/camera_params.py` and
+`data/camera_params.py` (train.py's `--edit_loss`, `--finish_aug`,
+`--cam_lora`, `--exif_cond`; see [`docs/training.md`](docs/training.md)) were
+written for OpenRAW from the papers' text. **No source code, weights or data
+from these projects is included.** Several of their licences wouldn't allow it
+in an MIT project: RawGen's is non-commercial and ParamISP's repository has no
+licence. They are credited here because the ideas are theirs. If you use
+these features in research, please cite the original papers. All BibTeX
+entries are collected in [`docs/references.bib`](docs/references.bib).
+
+**Edit-aware loss** (`--edit_loss`), from:
+
+> Abhijith Punnappurath, Luxi Zhao, Ke Zhao, Hue Nguyen, Radek Grzeszczuk,
+> Michael S. Brown (AI Center – Toronto, Samsung Electronics).
+> **Edit-aware RAW Reconstruction.** CVPR 2026.
+> Paper: <https://arxiv.org/abs/2512.05859>
+> No public code found (checked 2026-10-14).
+
+```bibtex
+@inproceedings{punnappurath2026editaware,
+  title     = {Edit-aware {RAW} Reconstruction},
+  author    = {Punnappurath, Abhijith and Zhao, Luxi and Zhao, Ke and Nguyen, Hue and
+               Grzeszczuk, Radek and Brown, Michael S.},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2026}
+}
+```
+(No BibTeX is published with the paper; this entry was assembled from the
+CVPR 2026 listing.)
+
+**Photo-finishing augmentation** (`--finish_aug`), after RawGen's training on
+many finished variants per target, from:
+
+> Dongyoung Kim, Junyong Lee, Abhijith Punnappurath, Mahmoud Afifi, Sangmin
+> Han, Alex Levinshtein, Michael S. Brown (AI Center – Toronto, Samsung
+> Electronics; Yonsei University).
+> **RawGen: Learning Camera Raw Image Generation.** ECCV 2026.
+> Paper: <https://arxiv.org/abs/2604.00093> · Code: <https://github.com/DY112/RawGen>
+> Licence: code CC BY-NC-SA 4.0; weights under the FLUX.1 [dev] Non-Commercial License.
+
+```bibtex
+@inproceedings{kim2026rawgen,
+  title     = {RawGen: Learning Camera Raw Image Generation},
+  author    = {Dongyoung Kim and Junyong Lee and Abhijith Punnappurath and
+               Mahmoud Afifi and Sangmin Han and Alex Levinshtein and
+               Michael S. Brown},
+  booktitle = {European Conference on Computer Vision (ECCV)},
+  year      = {2026}
+}
+```
+(BibTeX as given in RawGen's README.)
+
+**Per-camera adapters** (`--cam_lora`), after CamLoRA, from:
+
+> Huanjing Yue, Shangbin Xie, Cong Cao, Qian Wu, Lei Zhang, Lei Zhao,
+> Jingyu Yang.
+> **SpiralDiff: Spiral Diffusion with LoRA for RGB-to-RAW Conversion Across Cameras.** CVPR 2026.
+> Paper: <https://arxiv.org/abs/2603.14885> · Code: <https://github.com/Chuancy-TJU/SpiralDiff>
+> Licence: Apache-2.0.
+
+```bibtex
+@inproceedings{yue2026spiraldiff,
+  title     = {SpiralDiff: Spiral Diffusion with LoRA for RGB-to-RAW Conversion Across Cameras},
+  author    = {Yue, Huanjing and Xie, Shangbin and Cao, Cong and Wu, Qian and Zhang, Lei and Zhao, Lei and Yang, Jingyu},
+  booktitle = {IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+  year      = {2026}
+}
+```
+(BibTeX as given in SpiralDiff's README.)
+
+**EXIF conditioning** (`--exif_cond`), after ParamNet, from:
+
+> Woohyeok Kim, Geonu Kim, Junyong Lee, Seungyong Lee, Seung-Hwan Baek,
+> Sunghyun Cho.
+> **ParamISP: Learned Forward and Inverse ISPs using Camera Parameters.** CVPR 2024.
+> Paper: <https://arxiv.org/abs/2312.13313> · Code: <https://github.com/woo525/ParamISP>
+> Licence: none stated in the repository (checked 2026-10-14).
+
+```bibtex
+@inproceedings{kim2024paramisp,
+  title     = {ParamISP: Learned Forward and Inverse ISPs using Camera Parameters},
+  author    = {Kim, Woohyeok and Kim, Geonu and Lee, Junyong and Lee, Seungyong and Baek, Seung-Hwan and Cho, Sunghyun},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+  pages     = {26067--26076},
+  year      = {2024}
+}
+```
+(BibTeX as given in ParamISP's README.)
+
 ## `openraw/ml/` — superseded, NumPy architecture demo (kept for its tests)
 
 Before the real InvISP source and checkpoints were available to this

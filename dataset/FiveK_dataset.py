@@ -130,7 +130,10 @@ class FiveKDatasetTrain(BaseDataset):
         target_raw_img = self.np2tensor(target_raw_img).float()
         
         sample = {'input_raw':input_raw_img, 'target_rgb':target_rgb_img, 'target_raw':target_raw_img,
-                    'file_name':input_raw_wb_path.split("/")[-1].split(".")[0]}
+                    'file_name':input_raw_wb_path.split("/")[-1].split(".")[0],
+                    # PATCHED (OpenRAW): for per-camera adapters / EXIF conditioning
+                    'camera': self.camera_index[idx],
+                    'params': torch.from_numpy(self.camera_params(input_raw_wb, input_raw_wb_path))}
         return sample
 
 class FiveKDatasetTest(BaseDataset):
@@ -190,6 +193,9 @@ class FiveKDatasetTest(BaseDataset):
         target_raw_img = self.np2tensor(target_raw_img).float()
         
         sample = {'input_raw':input_raw_img, 'target_rgb':target_rgb_img, 'target_raw':target_raw_img,
-                    'file_name':input_raw_wb_path.split("/")[-1].split(".")[0]}
+                    'file_name':input_raw_wb_path.split("/")[-1].split(".")[0],
+                    # PATCHED (OpenRAW): for per-camera adapters / EXIF conditioning
+                    'camera': self.camera_index[idx],
+                    'params': torch.from_numpy(self.camera_params(input_raw_wb, input_raw_wb_path))}
         return sample
 

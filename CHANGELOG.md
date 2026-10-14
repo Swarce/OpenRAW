@@ -6,6 +6,26 @@ summarized; commit messages carry the full detail and measurements.
 ## [Unreleased]
 
 ### Added
+- Training: four optional additions from recent RAW-reconstruction papers,
+  written for OpenRAW from the papers (no code copied) and all off by
+  default. See `docs/training.md` "Optional additions"; credits and BibTeX are
+  in `NOTICE.md` and `docs/references.bib`.
+  - `--edit_loss`: an edit-aware loss after Punnappurath et al., CVPR 2026.
+    Predicted and true raws are compared after the same random edit.
+  - `--finish_aug`: photo-finishing augmentation after RawGen, ECCV 2026.
+    Differently finished JPEGs must invert to the same raw.
+  - `--cam_lora`: per-camera low-rank adapters after SpiralDiff's CamLoRA,
+    CVPR 2026, chosen from the JPEG's EXIF Make/Model.
+  - `--exif_cond`: conditioning on exposure time, f-number, ISO and focal
+    length, after ParamISP, CVPR 2024.
+  - `--train_new_only` fine-tunes only the added parts of an existing model.
+  - Checkpoints with adapters or conditioning describe themselves and load
+    everywhere: the converter, the app and `compare_models.py`. The network
+    stays exactly invertible.
+- `openraw/camera_params.py`: reads camera settings from JPEG and TIFF-based
+  raw EXIF. Newly prepared training pairs store them, and
+  `data/camera_params.py` backfills older pairs from the first 64 KB of each
+  raw file online. The Kaggle runner does this when `--exif_cond` is used.
 - Kaggle: live training status on Hugging Face. With `STATUS_REPO` set (and a
   Kaggle Secret `HF_TOKEN`), each training session uploads `status.json`,
   `eval.csv` and the last 200 log lines to a private dataset repo after every
