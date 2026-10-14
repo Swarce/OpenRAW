@@ -263,7 +263,7 @@ def prepare(cameras="all", budget_gb: float = 18.0, out: Path = None, jobs: int 
                "--delete-dngs", "--data-path", str(out) + "/", "--jobs", str(jobs)]
         if workers:
             cmd += ["--workers", str(workers)]
-        if subprocess.call(cmd) != 0:
+        if _call(cmd) != 0:
             log(f"preparing {label} failed -- continuing with the other cameras")
             continue
         done_cams.append(fp.camera_dir_name(label))
@@ -317,7 +317,7 @@ def prepare_raise(csv_path, budget_gb: float = 18.0, out: Path = None, cameras=(
             cmd += ["--camera", c]
         if workers:
             cmd += ["--workers", str(workers)]
-        if subprocess.call(cmd) != 0:
+        if _call(cmd) != 0:
             log(f"RAISE images #{pos}-#{pos + n - 1} failed -- continuing")
         pos += n
     shutil.rmtree(out / "raise", ignore_errors=True)  # only the (emptied) NEF download folders
@@ -374,18 +374,22 @@ def choose_gpus(gpus: int, env: dict) -> tuple[int, dict]:
     return 1, env
 
 
-def _call_teed(cmd, cwd, env, sink) -> int:
-    """subprocess.call, but every output line also goes to sink(line) -- for
-    the live status. Output still appears in Kaggle's log as it comes."""
+def _call(cmd, cwd=None, env=None, sink=None) -> int:
+    """Run a command, streaming its output through this process's sys.stdout
+    so each line appears ONCE in a Kaggle log. (A child writing straight to
+    the inherited stdout is recorded twice there: once from the raw stream,
+    once from the notebook's cell output.) sink: optional callable(line)
+    that also receives every line (the live status)."""
     p = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          text=True, bufsize=1, errors="replace")
     for line in p.stdout:
         sys.stdout.write(line)
         sys.stdout.flush()
-        try:
-            sink(line)
-        except Exception:  # noqa: BLE001 -- status must never stop training
-            pass
+        if sink is not None:
+            try:
+                sink(line)
+            except Exception:  # noqa: BLE001 -- status must never stop training
+                pass
     return p.wait()
 
 
@@ -420,9 +424,7 @@ def train(task: str, data_root: Path, epochs: int | None = None, time_limit_hour
         log(f"{n} training pairs -> {epochs} epochs (~{n * epochs:,} steps); {n_gpus} GPU(s); "
             f"time budget {limit:.2f} h; {'resuming' if resume else 'fresh start'}")
         log(" ".join(cmd))
-        if sink is not None:
-            return _call_teed(cmd, str(REPO), env, sink)
-        return subprocess.call(cmd, cwd=str(REPO), env=env)
+        return _call(cmd, str(REPO), env, sink)
 
     code = run_once(gpus)
     if code != 0 and gpus > 1:
@@ -448,7 +450,7 @@ def compare(task: str, data_root: Path, out: Path = None, extra: list | None = N
            "--out", str(out)] + ckpts
     log(f"comparing {len(ckpts)} checkpoint(s) on the held-out test images ...")
     try:
-        return subprocess.call(cmd, cwd=str(REPO), env=dict(os.environ, PYTHONUNBUFFERED="1"))
+        return _call(cmd, str(REPO), dict(os.environ, PYTHONUNBUFFERED="1"))
     except Exception as e:  # noqa: BLE001
         log(f"comparison failed: {e}")
         return 1
@@ -460,7 +462,7 @@ def amp_check(data_root: Path) -> int:
     cmd = [sys.executable, str(REPO / "tools" / "amp_check.py"), "--data_path", str(data_root) + "/"]
     log("checking mixed precision on this GPU (a few minutes) ...")
     try:
-        return subprocess.call(cmd, cwd=str(REPO), env=dict(os.environ, PYTHONUNBUFFERED="1"))
+        return _call(cmd, str(REPO), dict(os.environ, PYTHONUNBUFFERED="1"))
     except Exception as e:  # noqa: BLE001
         log(f"mixed-precision check failed: {e}")
         return 1

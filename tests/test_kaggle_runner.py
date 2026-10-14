@@ -99,7 +99,7 @@ def test_train_builds_the_right_command(kaggle, monkeypatch):
     kr.prepare("all", budget_gb=5)
     data = kaggle / "working" / kr.DATA_DIR
     seen = {}
-    monkeypatch.setattr(kr.subprocess, "call", lambda cmd, cwd, env: seen.update(cmd=cmd, cwd=cwd, env=env) or 0)
+    monkeypatch.setattr(kr, "_call", lambda cmd, cwd, env, sink=None: seen.update(cmd=cmd, cwd=cwd, env=env) or 0)
     monkeypatch.setattr(kr, "_gpu_count", lambda: 1)
     kr.train("t", data, epochs=7, session_start=__import__("time").time() - 3600)  # 1 h already used
     cmd = seen["cmd"]
@@ -151,7 +151,7 @@ def test_failed_multi_gpu_run_is_retried_on_one_gpu(kaggle, monkeypatch):
     data = kaggle / "working" / kr.DATA_DIR
     monkeypatch.setattr(kr, "choose_gpus", lambda gpus, env: (2, env))
     cmds = []
-    monkeypatch.setattr(kr.subprocess, "call", lambda cmd, cwd, env: cmds.append(cmd) or (1 if len(cmds) == 1 else 0))
+    monkeypatch.setattr(kr, "_call", lambda cmd, cwd, env, sink=None: cmds.append(cmd) or (1 if len(cmds) == 1 else 0))
     assert kr.train("t", data, epochs=3) == 0
     assert [c[c.index("--gpus") + 1] for c in cmds] == ["2", "1"]
 
@@ -204,7 +204,7 @@ def test_amp_check_only_measures_without_training(kaggle, monkeypatch):
     _publish_as_dataset(kaggle)
     calls = []
     monkeypatch.setattr(kr, "train", lambda *a, **k: calls.append("train") or 0)
-    monkeypatch.setattr(kr.subprocess, "call", lambda cmd, **k: calls.append(cmd) or 0)
+    monkeypatch.setattr(kr, "_call", lambda cmd, *a, **k: calls.append(cmd) or 0)
     assert kr.run(amp_check_only=True) == "amp checked"
     assert "train" not in calls
     assert calls[0][1].endswith("amp_check.py") and "--data_path" in calls[0]
@@ -308,3 +308,12 @@ def test_train_tees_output_to_the_status_sink(kaggle, monkeypatch):
     seen = []
     assert kr.train("t", data, epochs=1, sink=seen.append) == 0
     assert any("[EVAL]" in s for s in seen)
+
+
+def test_child_output_is_streamed_once_through_python(capfd):
+    """Kaggle records a child's direct writes to stdout twice; _call relays
+    them through this process instead."""
+    import sys as _sys
+    code = kr._call([_sys.executable, "-c", "print('hello from child')"])
+    out = capfd.readouterr().out
+    assert code == 0 and out.count("hello from child") == 1
