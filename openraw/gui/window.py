@@ -334,8 +334,10 @@ class _GpuProbe(QRunnable):
 # ------------------------------------------------------------------ main window
 
 METHODS = [  # (key, menu label, checkpoint file or None, note)
-    ("e14", "InvISP (recommended)", "openraw-fivek-raise-e14-best.pth",
-     "Neural network trained on real raws (FiveK + RAISE). Best results; slow on a CPU."),
+    ("r2e19", "InvISP (recommended)", "openraw-fivek-raise-r2-e19.pth",
+     "Neural network trained on real raws (FiveK + RAISE). Best results on real camera JPEGs; slow on a CPU."),
+    ("e14", "InvISP · previous (e14)", "openraw-fivek-raise-e14-best.pth",
+     "The earlier FiveK + RAISE model, kept for comparison."),
     ("nikon", "InvISP · upstream Nikon", "nikon.pth",
      "The original InvISP authors' Nikon D700 model."),
     ("classical", "Classical", None,
@@ -671,7 +673,7 @@ class MainWindow(QMainWindow):
         if geo is not None:
             self.restoreGeometry(geo)
         keys = [self.method.itemData(i) for i in range(self.method.count())]
-        want = get("method", "e14")
+        want = get("method", "r2e19")
         i = keys.index(want) if want in keys else 0
         if not self.method.model().item(i).isEnabled() or (want == "custom" and not Path(self.custom_checkpoint).is_file()):
             i = next((j for j in range(self.method.count()) if self.method.model().item(j).isEnabled()

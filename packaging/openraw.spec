@@ -20,7 +20,7 @@ from openraw import __version__  # noqa: E402
 
 datas = collect_data_files("openraw")  # fonts, logo, licences
 datas += [(str(ROOT / "pretrained" / f), "pretrained")
-          for f in ("openraw-fivek-raise-e14-best.pth", "nikon.pth")]
+          for f in ("openraw-fivek-raise-r2-e19.pth", "openraw-fivek-raise-e14-best.pth", "nikon.pth")]
 datas += [(str(ROOT / "examples" / "test_source.jpg"), "examples"),  # for --selftest
           (str(ROOT / "LICENSE"), "."), (str(ROOT / "NOTICE.md"), ".")]
 

@@ -46,7 +46,8 @@ The builds aren't code-signed yet, so the operating system asks once:
 1. **Add photos**: drag JPEGs or folders onto the window, or use *Add
    photos…* / *Add folder…*. Folders are searched recursively.
 2. **Settings** (remembered between launches):
-   - *Method*: **InvISP (recommended)** is the FiveK + RAISE model;
+   - *Method*: **InvISP (recommended)** is the FiveK + RAISE model `r2-e19`
+     (*previous (e14)* is the one before it);
      *upstream Nikon* is the original InvISP authors' model; *Classical*
      needs no neural network and is fast; *Custom checkpoint…* takes a
      `.pth` from your own [training run](training.md).

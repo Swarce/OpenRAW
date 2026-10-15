@@ -86,8 +86,9 @@ and shouldn't be expected to generalize to other cameras' JPEGs.
 
 `pretrained/openraw-fivek-e35-best.pth`,
 `pretrained/openraw-fivek-e46-latest.pth`,
-`pretrained/openraw-fivek-e53-best.pth` and
-`pretrained/openraw-fivek-raise-e14-best.pth` (FiveK and RAISE, see below)
+`pretrained/openraw-fivek-e53-best.pth`,
+`pretrained/openraw-fivek-raise-e14-best.pth` and
+`pretrained/openraw-fivek-raise-r2-e19.pth` (FiveK and RAISE, see below)
 are **not** upstream's: they were
 trained by OpenRAW with this repository's `train.py` (InvISP's architecture,
 vendored MIT code) on images from the MIT-Adobe FiveK dataset

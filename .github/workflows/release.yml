@@ -52,7 +52,7 @@ jobs:
         shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
-          OPENRAW_SELFTEST_REQUIRE: e14,nikon,classical
+          OPENRAW_SELFTEST_REQUIRE: r2e19,e14,nikon,classical
         run: |
           case "$RUNNER_OS" in
             Windows) powershell -Command '$p = Start-Process -FilePath "dist\OpenRAW\OpenRAW.exe" -ArgumentList "--selftest","selftest" -Wait -PassThru; exit $p.ExitCode' ;;

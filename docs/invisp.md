@@ -17,7 +17,7 @@ rendered sRGB. Full attribution in [NOTICE.md](../NOTICE.md).
 ```bash
 pip install ".[invisp]"     # adds PyTorch
 
-openraw photo.jpg --invisp-checkpoint pretrained/openraw-fivek-raise-e14-best.pth
+openraw photo.jpg --invisp-checkpoint pretrained/openraw-fivek-raise-r2-e19.pth
 openraw photo.jpg --invisp --invisp-camera NIKON_D700     # upstream model (or Canon_EOS_5D)
 ```
 
@@ -34,6 +34,7 @@ Weights aren't part of the installed package — see licensing below.
 | `openraw-fivek-e46-latest.pth` | OpenRAW | same | epoch 46, batch 1 | 38.32 dB | — |
 | `openraw-fivek-e53-best.pth` | OpenRAW | same | epoch 53, batch 1, then 2 (two GPUs) | 38.55 dB | 38.95 dB |
 | `openraw-fivek-raise-e14-best.pth` | OpenRAW | FiveK + RAISE (~1,930 images, 5 cameras) | `e53-best`, then 15 epochs on both, batch 2, weight averaging | **39.01 dB** | 39.42 dB |
+| `openraw-fivek-raise-r2-e19.pth` | OpenRAW | same | second FiveK + RAISE run, from scratch, mixed precision, batch 2, weight averaging; snapshot at epoch 19 | ~38.9 dB | **40.45 dB** |
 
 *Held-out raw PSNR: every model scored by `tools/compare_models.py` on the same
 40 held-out test images (512 px centre crops; FiveK Canon EOS 5D ×20, Nikon
@@ -41,16 +42,19 @@ D700 ×13, RAISE Nikon D7000 ×6, D90 ×1), JPEG → inverse network vs the true
 raw. Sony NEX-7: the [real-raw test below](#against-a-real-raw-sony-nex-7),
 gain-matched, linear DNG.*
 
-All six are trained on MIT-Adobe FiveK images, and `openraw-fivek-raise-*`
+All seven are trained on MIT-Adobe FiveK images, and `openraw-fivek-raise-*`
 also on RAISE; both datasets are licensed for research only, so the weights
 are offered for **non-commercial research use** (the code is MIT). Citations
 and terms: [NOTICE.md](../NOTICE.md#training-data).
 
-**Which to use:** `openraw-fivek-raise-e14-best` scores highest on the
-held-out set, ahead of upstream's `nikon.pth` on every camera there —
-including the D700 `nikon.pth` was trained on — except the one RAISE D90
-test image, and comes second on the Sony photos, 0.9 dB behind `nikon.pth`. It's the default suggestion; `nikon.pth` is worth trying
-too. `canon.pth` scores far lower everywhere (a strong magenta cast).
+**Which to use:** `openraw-fivek-raise-r2-e19` (the app's recommended
+model). It scores highest on the real-raw test below, ahead of upstream's
+`nikon.pth` on average (40.45 vs 40.32 dB gain-matched) and of `raise-e14`
+on every photo. On the held-out set it is ~0.1 dB below `raise-e14`, but
+that set measures how well a model undoes LibRaw's rendering, not a
+camera's: see [held-out vs real raws](#held-out-score-vs-real-raws).
+`raise-e14` and `nikon.pth` stay available. `canon.pth` scores far lower
+everywhere (a strong magenta cast).
 
 What the differences mean in practice:
 
@@ -117,9 +121,12 @@ sharpest 2048×2048 px region.
 | InvISP `openraw-fivek-e53-best` | linear | 38.95 dB | 28.55 dB | 29.68 dB |
 | InvISP `openraw-fivek-e53-best` | CFA | 38.97 dB | 28.56 dB | 29.70 dB |
 | InvISP `nikon.pth` (upstream) | linear | 40.32 dB | 30.25 dB | 32.48 dB |
-| InvISP `nikon.pth` (upstream) | CFA | **40.33 dB** | **30.25 dB** | **32.50 dB** |
+| InvISP `nikon.pth` (upstream) | CFA | 40.33 dB | 30.25 dB | 32.50 dB |
 | InvISP `openraw-fivek-raise-e14-best` | linear | 39.42 dB | 29.34 dB | 31.64 dB |
 | InvISP `openraw-fivek-raise-e14-best` | CFA | 39.44 dB | 29.35 dB | 31.67 dB |
+| InvISP `openraw-fivek-raise-r2-e19` | linear | 40.45 dB | 30.57 dB | 33.36 dB |
+| InvISP `openraw-fivek-raise-r2-e19` | CFA | **40.48 dB** | **30.58 dB** | **33.36 dB** |
+| InvISP run 2's `best.pth` (epoch 41, not shipped) | linear | 38.70 dB | 28.69 dB | 30.11 dB |
 
 *Means over the four photos; per photo in
 [`examples/nex7_raw_pair_results.csv`](../examples/nex7_raw_pair_results.csv).*
@@ -134,12 +141,13 @@ sharpest 2048×2048 px region.
   only undoes the sRGB curve, so it keeps the camera's contrast and
   saturation, and its brightness is far from the raw's (16 dB as converted).
   InvISP undoes the rendering itself.
-- **Upstream's `nikon.pth` scored highest** overall, even though it learned
-  a single different camera. OpenRAW's FiveK + RAISE model (`raise-e14`)
-  closed most of the gap: 0.9 dB behind on average (was 1.4 dB for
-  `e53-best`), level on DSC00245, 0.5-1.6 dB behind on the others, and
-  0.1-0.6 dB ahead of `e53-best` on every photo. Why a single-camera model
-  transfers this well to the Sony isn't known yet.
+- **`raise-r2-e19` scores highest** on average, on all three measures. It
+  beats `raise-e14` on every photo (by 0.4-1.5 dB) and upstream's
+  `nikon.pth` on two of four: +0.35 dB on DSC00244 and +1.48 dB on DSC00245,
+  -0.56 and -0.74 dB on DSC00246 and DSC00247. So the lead over `nikon.pth`
+  is small and photo-dependent. Before it, `nikon.pth` led: `raise-e14` was
+  0.9 dB behind, `e53-best` 1.4 dB. Why a single-camera model transfers this
+  well to the Sony isn't known yet.
 - **CFA costs nothing** here: a CFA DNG, demosaiced by the same converter
   (AHD), scores within 0.05 dB of the linear one for every method and photo
   (0.01-0.04 dB higher on average). The real raw went through a Bayer filter
@@ -150,12 +158,40 @@ sharpest 2048×2048 px region.
 - Four photos, one camera, one session, similar subjects (flowers, close
   up): a first real measurement, not a benchmark.
 
+### Held-out score vs real raws
+
+Run 2 (`openraw-fivek-raise-r2-*`) trained from scratch on FiveK + RAISE.
+Its held-out score kept creeping up, while its score on the real NEX-7 raws
+fell after about epoch 20 (DSC00246 and DSC00247, the two photos scored at
+every snapshot):
+
+| Run 2 snapshot | Held-out raw PSNR | NEX-7 gain-matched | NEX-7 display |
+|---|---|---|---|
+| epoch 9 | ~38.0 dB | 40.80 dB | 30.92 dB |
+| epoch 19 (shipped as `r2-e19`) | ~38.9 dB | 39.80 dB | 31.13 dB |
+| epoch 39 | ~39.0 dB | 37.19 dB | 28.91 dB |
+| epoch 41 (`best.pth`) | 39.11 dB | 37.71 dB | 28.96 dB |
+
+*Held-out values marked ~ are the nearest evaluation (epochs 8, 20, 38) in
+[`results/raise-r2/eval.csv`](results/raise-r2/eval.csv). Run 2's settings
+and the end-of-session comparison are in [`results/raise-r2/`](results/raise-r2/).*
+
+The held-out targets are LibRaw renders, like the training targets. Past
+~20 epochs the network gets better at undoing LibRaw's rendering and worse
+at undoing a camera's. So `best.pth`, which training picks by the held-out
+score, is not the best model for camera JPEGs. Choose by a real-raw test,
+and keep snapshots (`train.py --snapshot_every`). Epoch 9 scores a little
+higher gain-matched on those two photos and epoch 19 a little higher in
+display terms; over all four photos epoch 19 is ahead (40.45 vs 40.39 dB
+gain-matched, 30.57 vs 30.38 dB display), so epoch 19 is the one shipped.
+
 ![DSC00244: camera JPEG, real raw, and each method](../examples/nex7_DSC00244_compare.jpg)
 ![DSC00245](../examples/nex7_DSC00245_compare.jpg)
 ![DSC00246](../examples/nex7_DSC00246_compare.jpg)
 ![DSC00247](../examples/nex7_DSC00247_compare.jpg)
 
-*Crops of each photo's most detailed area. Every raw-derived tile is rendered
+*Crops of each photo's most detailed area, for `raise-r2-e19`, run 2's
+`best.pth`, `raise-e14` and `nikon.pth`. Every raw-derived tile is rendered
 the same way and matched to the real raw's exposure; the JPEG is shown as
 the camera wrote it. Note how the raw is flatter and less saturated than the
 JPEG — it has no tone curve until an editor applies one — and how closely
@@ -166,7 +202,7 @@ To measure your own camera: shoot RAW + JPEG and run
 
 ```bash
 python tools/raw_pair_eval.py my_pairs/ --out results/ --crops --region 2048 \
-    --checkpoint pretrained/openraw-fivek-raise-e14-best.pth --checkpoint pretrained/nikon.pth
+    --checkpoint pretrained/openraw-fivek-raise-r2-e19.pth --checkpoint pretrained/nikon.pth
 ```
 
 (`--region 2048` keeps it to a few minutes per photo and model on a CPU;

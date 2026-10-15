@@ -6,6 +6,21 @@ summarized; commit messages carry the full detail and measurements.
 ## [Unreleased]
 
 ### Added
+- **`openraw-fivek-raise-r2-e19.pth`**, the new recommended model: epoch 19
+  of a second FiveK + RAISE run, trained from scratch with mixed precision.
+  On the four Sony NEX-7 RAW+JPEG pairs it scores 40.45 dB gain-matched,
+  against 39.42 dB for `raise-e14` and 40.32 dB for upstream's `nikon.pth`.
+  The app now uses it by default and keeps `raise-e14` as *InvISP ·
+  previous (e14)*; the release builds bundle both.
+- The same run showed that the held-out score (LibRaw renders) and the
+  real-raw score diverge after ~20 epochs: its `best.pth` (39.11 dB
+  held-out) scores only 38.70 dB on the real raws. Results, snapshots and
+  the run's settings are in `docs/invisp.md` and `docs/results/raise-r2/`.
+- `train.py --snapshot_every N`, and Kaggle `INIT_FROM` can name a snapshot
+  (`"openraw-fivek/0019.pth"`). The Kaggle runner now stops, instead of
+  preparing data, when a GPU session or an `INIT_FROM` run has no datasets
+  attached.
+- `tools/raw_pair_eval.py`: comparison images with much larger text.
 - Training: four optional additions from recent RAW-reconstruction papers,
   written for OpenRAW from the papers (no code copied) and all off by
   default. See `docs/training.md` "Optional additions"; credits and BibTeX are

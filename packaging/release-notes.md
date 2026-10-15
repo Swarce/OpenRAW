@@ -16,7 +16,7 @@ Everything is included: no Python or other installs needed. The builds aren't co
 ### Highlights
 
 - **Desktop app**: drag-and-drop queue, live progress, before/after compare against the DNG as a raw editor renders it, themes including dark and high contrast (orange accent).
-- **InvISP reconstruction** with OpenRAW's FiveK + RAISE model (recommended) or upstream's Nikon model; scored against real Sony NEX-7 raws in [docs/invisp.md](https://github.com/Swarce/OpenRAW/blob/main/docs/invisp.md).
+- **InvISP reconstruction** with OpenRAW's FiveK + RAISE model `r2-e19` (recommended), the earlier `e14`, or upstream's Nikon model; scored against real Sony NEX-7 raws in [docs/invisp.md](https://github.com/Swarce/OpenRAW/blob/main/docs/invisp.md).
 - **Bayer (CFA) DNGs**, ~3x smaller, demosaiced by your editor — now with optional camera-style **anti-aliasing**.
 
 Full list in the [changelog](https://github.com/Swarce/OpenRAW/blob/main/CHANGELOG.md).
