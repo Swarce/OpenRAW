@@ -173,3 +173,23 @@ def test_stop_leaves_no_partial_file(app, win, tmp_path):
     assert STOPPED in [j["status"] for j in win.jobs]
     assert not list(big.glob("*.partial"))
     assert not list(big.glob("*.dng.partial"))
+
+
+def test_old_default_moves_to_the_new_recommended_model(app, tmp_path):
+    """Settings from 0.1.0a1 say "e14" because it was the default then; those
+    users move to the new recommended model. A choice made since is kept."""
+    from openraw.gui.window import RECOMMENDED
+
+    def loaded(**values):
+        s = QSettings(str(tmp_path / f"{len(list(tmp_path.iterdir()))}.ini"), QSettings.IniFormat)
+        for k, v in values.items():
+            s.setValue(k, v)
+        s.sync()
+        w = MainWindow(settings=s)
+        key = w.method.currentData()
+        w.runner.shutdown()
+        return key
+    assert loaded() == RECOMMENDED
+    assert loaded(method="e14") == RECOMMENDED                        # 0.1.0a1's default
+    assert loaded(method="e14", recommended=RECOMMENDED) == "e14"     # picked on purpose later
+    assert loaded(method="nikon") == "nikon"

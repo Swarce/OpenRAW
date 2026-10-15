@@ -333,6 +333,8 @@ class _GpuProbe(QRunnable):
 
 # ------------------------------------------------------------------ main window
 
+RECOMMENDED = "r2e19"  # the method new installs start on (and old defaults move to)
+
 METHODS = [  # (key, menu label, checkpoint file or None, note)
     ("r2e19", "InvISP (recommended)", "openraw-fivek-raise-r2-e19.pth",
      "Neural network trained on real raws (FiveK + RAISE). Best results on real camera JPEGs; slow on a CPU."),
@@ -673,7 +675,12 @@ class MainWindow(QMainWindow):
         if geo is not None:
             self.restoreGeometry(geo)
         keys = [self.method.itemData(i) for i in range(self.method.count())]
-        want = get("method", "r2e19")
+        want = get("method", RECOMMENDED)
+        # Settings saved while an older model was the recommended one still name it.
+        # Someone who was on the recommended model moves to the new one; anyone who
+        # picked another method keeps it. (Releases before 0.1.0a2 recommended "e14".)
+        if want == (s.value("recommended") or "e14") and want != RECOMMENDED:
+            want = RECOMMENDED
         i = keys.index(want) if want in keys else 0
         if not self.method.model().item(i).isEnabled() or (want == "custom" and not Path(self.custom_checkpoint).is_file()):
             i = next((j for j in range(self.method.count()) if self.method.model().item(j).isEnabled()
@@ -712,6 +719,7 @@ class MainWindow(QMainWindow):
         s.setValue("overwrite", self.overwrite.isChecked())
         s.setValue("render_mode", self.render_mode.currentIndex())
         s.setValue("custom_checkpoint", self.custom_checkpoint)
+        s.setValue("recommended", RECOMMENDED)
         s.sync()
 
     # ============================================================== themes

@@ -46,6 +46,8 @@ summarized; commit messages carry the full detail and measurements.
   preparing data, when a GPU session or an `INIT_FROM` run has no datasets
   attached.
 - `tools/raw_pair_eval.py`: comparison images with much larger text.
+- App: settings saved while `e14` was the default move to the new
+  recommended model on first launch; a model picked on purpose is kept.
 - Training: four optional additions from recent RAW-reconstruction papers,
   written for OpenRAW from the papers (no code copied) and all off by
   default. See `docs/training.md` "Optional additions"; credits and BibTeX are
