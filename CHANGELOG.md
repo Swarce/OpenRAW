@@ -3,7 +3,7 @@
 All notable changes. Development history before the first release is
 summarized; commit messages carry the full detail and measurements.
 
-## [Unreleased]
+## [0.1.0a2] — 2026-10-15
 
 ### Added — code from RawGen and SpiralDiff, credited
 - `openraw/third_party/rawgen/` (CC BY-NC-SA 4.0): RawGen's random
@@ -48,6 +48,14 @@ summarized; commit messages carry the full detail and measurements.
 - `tools/raw_pair_eval.py`: comparison images with much larger text.
 - App: settings saved while `e14` was the default move to the new
   recommended model on first launch; a model picked on purpose is kept.
+- App: double-click a finished photo (or right-click → *Open the DNG*) to
+  open its DNG in the system's raw editor, falling back to its folder.
+- App: right-click → *Cancel this photo* cancels the conversion in progress
+  and carries on with the rest of the queue.
+
+### Fixed
+- App: a selected row's status lost its colour (the selection's text colour
+  replaced it).
 - Training: four optional additions from recent RAW-reconstruction papers,
   written for OpenRAW from the papers (no code copied) and all off by
   default. See `docs/training.md` "Optional additions"; credits and BibTeX are

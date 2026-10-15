@@ -10,11 +10,12 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRunnable, QSettings, Qt, QThreadPool, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap
+from PySide6.QtGui import (QAction, QActionGroup, QColor, QDesktopServices, QFont, QImage, QKeySequence, QPainter,
+                           QPalette, QPen, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu,
-                               QMessageBox, QProgressBar, QPushButton, QSlider, QSplitter, QStatusBar, QTableWidget,
-                               QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
+                               QMessageBox, QProgressBar, QPushButton, QSlider, QSplitter, QStatusBar,
+                               QStyledItemDelegate, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
 
 from . import preview, style
 from .worker import Runner, find_pretrained
@@ -270,6 +271,19 @@ class QueueTable(QTableWidget):
             p.drawText(self.viewport().rect(), Qt.AlignCenter, self.empty_text)
 
 
+class KeepColourDelegate(QStyledItemDelegate):
+    """Selected rows keep each cell's own text colour (status green/red/accent,
+    dim paths). Without this the selection's text colour replaced it, so a
+    selected row's status lost its colour."""
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        fg = index.data(Qt.ForegroundRole)
+        if fg is not None:
+            colour = fg.color() if hasattr(fg, "color") else QColor(fg)
+            option.palette.setColor(QPalette.HighlightedText, colour)
+
+
 # ------------------------------------------------------------------ preview loading (thread pool)
 
 
@@ -482,6 +496,7 @@ class MainWindow(QMainWindow):
         t.setEditTriggers(QAbstractItemView.NoEditTriggers)
         t.setWordWrap(False)
         t.setTextElideMode(Qt.ElideMiddle)
+        t.setItemDelegate(KeepColourDelegate(t))
         hh = t.horizontalHeader()
         hh.setHighlightSections(False)
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -495,7 +510,7 @@ class MainWindow(QMainWindow):
         t.itemSelectionChanged.connect(self._selection_changed)
         t.dropped.connect(self.add_paths)
         t.remove_requested.connect(self.remove_selected)
-        t.doubleClicked.connect(lambda _: self._open_selected_folder())
+        t.doubleClicked.connect(lambda _: self.open_selected_dng())
         self.queue = t
         body.addWidget(t)
 
@@ -852,19 +867,62 @@ class MainWindow(QMainWindow):
         if not rows:
             return
         m = QMenu(self)
+        has_dng = self.jobs[rows[0]]["status"] in (DONE, SKIPPED) and bool(self.jobs[rows[0]]["dst"])
+        a_dng = m.addAction("Open the DNG")
+        a_dng.setEnabled(has_dng)
         a_open = m.addAction("Show the DNG in its folder")
         a_open.setEnabled(any(self.jobs[r]["status"] in (DONE, SKIPPED) for r in rows))
         a_src = m.addAction("Show the JPEG in its folder")
         m.addSeparator()
+        a_cancel = m.addAction("Cancel this photo")
+        a_cancel.setEnabled(any(self.jobs[r]["status"] == CONVERTING for r in rows))
         a_rm = m.addAction("Remove from queue")
-        a_rm.setEnabled(any(self.jobs[r]["status"] != CONVERTING for r in rows))
+        a_rm.setEnabled(any(self.jobs[r]["status"] not in (CONVERTING, "Sent") for r in rows))
         chosen = m.exec(self.queue.viewport().mapToGlobal(pos))
-        if chosen == a_open:
+        if chosen == a_dng:
+            self.open_selected_dng()
+        elif chosen == a_cancel:
+            self.cancel_current()
+        elif chosen == a_open:
             self._open_selected_folder()
         elif chosen == a_src:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.jobs[rows[0]]["src"].parent)))
         elif chosen == a_rm:
             self.remove_selected()
+
+    def open_selected_dng(self) -> None:
+        """Open the selected photo's DNG in the app the system uses for .dng
+        files (usually a raw editor); if there isn't one, show it in its folder."""
+        rows = self.selected_rows()
+        if not rows:
+            return
+        job = self.jobs[rows[0]]
+        if job["status"] not in (DONE, SKIPPED) or not job["dst"] or not Path(job["dst"]).is_file():
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(job["dst"]))):
+            self.statusBar().showMessage("No app is set to open .dng files: showing the DNG in its folder instead.",
+                                         8000)
+            self._open_selected_folder()
+
+    def cancel_current(self) -> None:
+        """Cancel the photo being converted and carry on with the rest of the
+        queue. Its half-written file is removed, as with Stop."""
+        if not self.running:
+            return
+        cur = [j for j in self.jobs if j["status"] in (CONVERTING, "Sent")]
+        self.runner.stop([j["dst"] for j in cur])
+        for j in cur:
+            if j["status"] == CONVERTING:
+                j.update(status=STOPPED, stage="", progress=None, detail="Cancelled")
+                self.batch["total"] -= 1
+            else:
+                j["status"] = WAITING  # handed over but not started: goes back in line
+            self._paint_row(self.jobs.index(j))
+        if not self._submit_next():
+            self._finish_batch()
+        else:
+            self._update_status()
+            self._update_buttons()
 
     def _open_selected_folder(self) -> None:
         rows = self.selected_rows()

@@ -69,8 +69,12 @@ The builds aren't code-signed yet, so the operating system asks once:
    exposure and white balance to compare colour and detail. *100%* shows
    actual pixels; drag to pan.
 
-Right-click a photo to show its DNG or JPEG in the file manager, or to
-remove it from the queue (Delete key works too).
+Double-click a finished photo to open its DNG in the app your system uses
+for `.dng` files (usually your raw editor); if none is set, its folder opens
+instead. Right-click a photo to open its DNG, show the DNG or JPEG in the
+file manager, remove it from the queue (Delete key works too, also for
+photos still waiting while others convert), or *Cancel this photo* while it
+converts: its unfinished file is removed and the rest of the queue carries on.
 
 ## Themes
 

@@ -193,3 +193,50 @@ def test_old_default_moves_to_the_new_recommended_model(app, tmp_path):
     assert loaded(method="e14") == RECOMMENDED                        # 0.1.0a1's default
     assert loaded(method="e14", recommended=RECOMMENDED) == "e14"     # picked on purpose later
     assert loaded(method="nikon") == "nikon"
+
+
+def test_selected_rows_keep_their_status_colour(app, win, tmp_path):
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    win.add_paths([str(_photos(tmp_path, n=1, sub=False))])
+    win.jobs[0]["status"] = DONE
+    win._paint_row(0)
+    win.queue.selectRow(0)
+    opt = QStyleOptionViewItem()
+    win.queue.itemDelegate().initStyleOption(opt, win.queue.model().index(0, 2))
+    assert opt.palette.color(QPalette.HighlightedText).name().lower() == win.theme.ok.lower()
+
+
+def test_cancel_one_photo_and_carry_on(app, win, tmp_path):
+    import numpy as np
+    from PIL import Image
+    d = tmp_path / "big"
+    d.mkdir()
+    img = (np.random.default_rng(1).random((3000, 4000, 3)) * 255).astype(np.uint8)
+    Image.fromarray(img).save(d / "a.jpg", quality=90)
+    shutil.copy(SRC, d / "b.jpg")
+    win.add_paths([str(d / "a.jpg"), str(d / "b.jpg")])
+    win.start()
+    t = time.time()
+    while win.jobs[0]["status"] != "Converting" and time.time() - t < 60:
+        app.processEvents()
+        time.sleep(0.02)
+    win.cancel_current()
+    assert win.running  # the rest of the queue continues
+    _run(app, win)
+    assert [j["status"] for j in win.jobs] == [STOPPED, DONE]
+    assert win.jobs[0]["detail"] == "Cancelled" and not list(d.glob("*.partial"))
+    assert "1 done" in win.status_left.text()
+
+
+def test_open_the_dng_or_its_folder(app, win, tmp_path, monkeypatch):
+    from PySide6.QtGui import QDesktopServices
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()) or len(opened) > 1)
+    win.add_paths([str(_photos(tmp_path, n=1, sub=False))])
+    dng = tmp_path / "x.dng"
+    dng.write_bytes(b"dng")
+    win.jobs[0].update(status=DONE, dst=dng)
+    win.queue.selectRow(0)
+    win.open_selected_dng()  # no app for .dng (openUrl -> False): falls back to the folder
+    assert opened == [str(dng), str(tmp_path)]
