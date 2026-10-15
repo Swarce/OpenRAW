@@ -189,13 +189,20 @@ def find_checkpoint(task: str, root: Path = None) -> Path | None:
 
 def start_from(init_from: str, out_path: Path, task: str, root: Path = None) -> Path | None:
     """Start `task` from another run's weights: copy that run's best.pth (else
-    latest.pth) from the attached inputs -- init_from is its TASK name, or a
-    path to a .pth -- to <out_path>/<task>/checkpoint/latest.pth. train.py's
+    latest.pth) from the attached inputs -- init_from is its TASK name, a
+    path to a .pth, or "<TASK>/<file>.pth" (a snapshot: "openraw-fivek/0019.pth")
+    -- to <out_path>/<task>/checkpoint/latest.pth. train.py's
     --resume then loads it as a weights-only checkpoint: epoch 0, a fresh
     optimizer, LR schedule, test set and best score. Returns the source file."""
     root = Path(root or INPUT)
     src = Path(init_from) if str(init_from).endswith(".pth") else None
-    if src is None:
+    if src is not None and not src.is_file() and not src.is_absolute():
+        # "openraw-fivek/0019.pth": that run's snapshot, wherever its output is attached
+        task_name, _, fname = str(init_from).replace("\\", "/").rpartition("/")
+        hits = sorted(root.rglob(f"exps/{task_name}/checkpoint/{fname}") if task_name else root.rglob(fname),
+                      key=lambda p: p.stat().st_mtime)
+        src = hits[-1] if hits else None
+    if src is None and not str(init_from).endswith(".pth"):
         for name in ("best.pth", "latest.pth"):
             hits = sorted(root.rglob(f"exps/{init_from}/checkpoint/{name}"), key=lambda p: p.stat().st_mtime)
             if hits:

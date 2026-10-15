@@ -88,6 +88,12 @@ scores stay separate and `compare.md` can put them next to the plain run:
   output),
   `EXTRA_TRAIN_ARGS = ["--amp", "--cam_lora", "4", "--exif_cond", "--train_new_only"]`.
 
+`INIT_FROM` can also name one snapshot of a run, as `"<TASK>/<file>.pth"`
+(for example `"openraw-fivek/0019.pth"`, with that run's output attached).
+The best checkpoint on real camera JPEGs isn't always the `best.pth` that the
+held-out evaluation picks. `--snapshot_every N` keeps more snapshots to choose
+from (the default is every 10 epochs).
+
 With `--exif_cond`, the runner first reads each training photo's camera
 settings. It fetches the first 64 KB of each original raw file, which takes a
 few minutes and needs Internet on (it is on by default). It saves them as

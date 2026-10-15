@@ -106,6 +106,10 @@ if __name__ == "__main__":
                              "than any single step's. 0 = off.")
     parser.add_argument("--eval_images", type=int, default=40, help="max test images per evaluation (spread across cameras)")
     parser.add_argument("--eval_crop", type=int, default=512, help="centre crop size for evaluation")
+    parser.add_argument("--snapshot_every", type=int, default=10,
+                        help="keep a NNNN.pth snapshot (averaged weights) every N epochs (default 10). Snapshots "
+                             "matter: the best checkpoint on real camera JPEGs isn't always the one the held-out "
+                             "evaluation picks as best.pth")
     parser.add_argument("--amp", action="store_true",
                         help="mixed precision (experimental): the dense sub-networks, where nearly all the compute "
                              "is, run in float16 on CUDA (bfloat16 on CPU); the invertible coupling, the JPEG "
@@ -704,7 +708,7 @@ def main(args, rank=0, world=1):
                **({cond_mod.META_KEY: cond.meta()} if cond is not None else {}),
                **({"ema": ema.state_dict(), "ema_updates": ema.updates} if ema is not None else {})},
               ckpt + "latest_state.pth")
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % max(1, getattr(args, "snapshot_every", 10) or 10) == 0:
             _save(weights(), ckpt + "%04d.pth" % epoch)
             print("[INFO] Successfully saved " + ckpt + "%04d.pth" % epoch)
 

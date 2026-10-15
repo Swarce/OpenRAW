@@ -325,3 +325,9 @@ def test_converter_uses_the_photos_camera_and_settings(tmp_path):
     plain = tmp_path / "plain.pth"
     torch.save(_net(blocks=8).state_dict(), plain)
     assert ib._condition(ib._load_net("", "", "cpu", checkpoint=str(plain)), {"model": "x"}) is None
+
+
+def test_snapshot_every(tmp_path, monkeypatch):
+    run, ckpt, _ = _setup(tmp_path, monkeypatch)
+    run(epochs=2, snapshot_every=1)
+    assert (ckpt / "0000.pth").exists() and (ckpt / "0001.pth").exists()

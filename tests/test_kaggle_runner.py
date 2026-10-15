@@ -340,3 +340,15 @@ def test_exif_cond_reads_camera_settings_and_keeps_them_for_next_session(tmp_pat
     assert calls and calls[0][1].endswith("camera_params.py")
     saved = json.loads((out / "camera_params.json").read_text())
     assert table == data / "camera_params.json" and set(saved) == {"CAM/a", "CAM/b"}
+
+
+def test_init_from_a_snapshot_of_another_run(tmp_path):
+    inp = tmp_path / "input" / "prev-output" / "exps" / "openraw-fivek" / "checkpoint"
+    inp.mkdir(parents=True)
+    (inp / "0019.pth").write_bytes(b"snap19")
+    (inp / "best.pth").write_bytes(b"best")
+    out = tmp_path / "exps"
+    src = kr.start_from("openraw-fivek/0019.pth", out, "new-task", root=tmp_path / "input")
+    assert src == inp / "0019.pth" and (out / "new-task" / "checkpoint" / "latest.pth").read_bytes() == b"snap19"
+    assert kr.start_from("openraw-fivek/0099.pth", out, "t2", root=tmp_path / "input") is None
+    assert kr.start_from("openraw-fivek", out, "t3", root=tmp_path / "input") == inp / "best.pth"
