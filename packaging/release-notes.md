@@ -21,6 +21,6 @@ Everything is included: no Python or other installs needed. The builds aren't co
 
 Full list in the [changelog](https://github.com/Swarce/OpenRAW/blob/main/CHANGELOG.md).
 
-**Model weights** are trained on MIT-Adobe FiveK and RAISE and are for **non-commercial research use**; the code is MIT. See [NOTICE.md](https://github.com/Swarce/OpenRAW/blob/main/NOTICE.md).
+**Model weights** are trained on MIT-Adobe FiveK and RAISE and are for **non-commercial research use**; the code is licensed CC BY-NC-SA 4.0 (non-commercial, share-alike). See [NOTICE.md](https://github.com/Swarce/OpenRAW/blob/main/NOTICE.md).
 
 This is an alpha: please report problems with the version info from the app's *About* box or `openraw --version`.

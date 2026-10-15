@@ -158,13 +158,20 @@ classical path — about 39–40.5 dB vs 36.5 dB after matching exposure,
 
 ## Credits & license
 
-MIT licensed — see [LICENSE](LICENSE). Includes vendored code from
-**InvISP** (Xing, Qian & Chen, CVPR 2021, MIT); full attribution in
-[NOTICE.md](NOTICE.md).
+OpenRAW is licensed under **[CC BY-NC-SA 4.0](LICENSE)**: free to use,
+share and adapt for non-commercial purposes, with credit, under the same
+terms. (Versions up to 0.1.0a1 were MIT and stay MIT for anyone who got them
+then.) It builds on other people's research, and they deserve the
+spotlight: **InvISP** (Xing, Qian & Chen, CVPR 2021, MIT) is the network at
+its core, and the optional training features follow **Edit-aware RAW
+Reconstruction** (Punnappurath et al., CVPR 2026), **RawGen** (Kim et al.,
+ECCV 2026), **SpiralDiff** (Yue et al., CVPR 2026) and **ParamISP** (Kim et
+al., CVPR 2024). Authors, links, licences and BibTeX for each are in
+[NOTICE.md](NOTICE.md) and [docs/references.bib](docs/references.bib).
 
 The InvISP models are trained on the **MIT-Adobe FiveK** dataset
 (Bychkovsky, Paris, Chan & Durand, CVPR 2011), and training can also use
 **RAISE** (Dang-Nguyen, Pasquini, Conotter & Boato, ACM MMSys 2015). Both
 datasets are licensed for research only, so the weights in `pretrained/` are
-offered for **non-commercial research use**, unlike the code. Citations and
+offered for **non-commercial research use**, like the code. Citations and
 terms: [NOTICE.md](NOTICE.md#training-data).

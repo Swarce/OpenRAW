@@ -1,4 +1,27 @@
-# Third-party attribution
+# Licence and third-party attribution
+
+## OpenRAW's licence
+
+OpenRAW
+Copyright (c) 2026 Riley (Swarce) and OpenRAW contributors
+
+OpenRAW's own code, documentation and trained model weights are licensed
+under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International License** (CC BY-NC-SA 4.0); the full text is in
+[`LICENSE`](LICENSE) and at <https://creativecommons.org/licenses/by-nc-sa/4.0/>.
+In short (the licence text is what applies): you may share and adapt OpenRAW
+for non-commercial purposes, giving credit, and must license what you make
+from it under the same terms.
+
+**Earlier versions:** OpenRAW was released under the MIT License up to and
+including commit `629bd63` (2026-10-15), which includes release 0.1.0a1.
+Copies obtained under those terms keep them. Everything after that commit is
+CC BY-NC-SA 4.0.
+
+**Third-party code** in this repository keeps its own licence, and credit
+for it belongs to its authors. Each project, its authors and its licence are
+listed below; licence texts are kept next to the code (for example
+`openraw/third_party/invisp/LICENSE`, MIT).
 
 ## `openraw/third_party/invisp/` — vendored source code (not just cited)
 
@@ -94,7 +117,7 @@ trained by OpenRAW with this repository's `train.py` (InvISP's architecture,
 vendored MIT code) on images from the MIT-Adobe FiveK dataset
 (Bychkovsky, Paris, Chan & Durand, CVPR 2011), whose images are licensed
 for research use only. These weights are therefore offered for
-**non-commercial research use**, unlike the MIT-licensed code; see
+**non-commercial research use**, like the rest of OpenRAW; see
 "Training data" below.
 
 InvISP's own README credits the invertible-block design it builds on to:
@@ -115,9 +138,13 @@ The optional training additions in `openraw/conditioning.py`,
 `data/camera_params.py` (train.py's `--edit_loss`, `--finish_aug`,
 `--cam_lora`, `--exif_cond`; see [`docs/training.md`](docs/training.md)) were
 written for OpenRAW from the papers' text. **No source code, weights or data
-from these projects is included.** Several of their licences wouldn't allow it
-in an MIT project: RawGen's is non-commercial and ParamISP's repository has no
-licence. They are credited here because the ideas are theirs. If you use
+from these projects is included so far.** Since OpenRAW moved to CC BY-NC-SA
+4.0 (2026-10-15), code under compatible licences can be brought in:
+SpiralDiff's (Apache-2.0) and RawGen's (CC BY-NC-SA 4.0, the same licence).
+ParamISP's repository has no licence at all, so its code needs the authors'
+permission whatever OpenRAW's licence is. Anything brought in will keep its
+authors' copyright notices and licence and be listed here. They are credited
+here because the ideas are theirs. If you use
 these features in research, please cite the original papers. All BibTeX
 entries are collected in [`docs/references.bib`](docs/references.bib).
 
@@ -292,8 +319,8 @@ RAISE download page, where the terms are accepted; it isn't included here.
 
 ### What this means for the weights
 
-The code in this repository is MIT licensed. The trained weights are a
-different matter: they're learned from images licensed for research only.
+OpenRAW's code is licensed under CC BY-NC-SA 4.0 (MIT up to 0.1.0a1), and
+the trained weights are learned from images licensed for research only.
 OpenRAW therefore offers every checkpoint in `pretrained/` — upstream's and
 its own — for **non-commercial research use**, and a model you train on
 FiveK or RAISE with these scripts carries the same expectation.

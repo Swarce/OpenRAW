@@ -1169,9 +1169,13 @@ class MainWindow(QMainWindow):
             f"<h3>OpenRAW {self.version}</h3>"
             "<p>Turns JPEGs into editable raw DNGs, linear or Bayer mosaic.</p>"
             f"<p><a href='{REPO_URL}'>{REPO_URL}</a></p>"
-            "<p>Code: MIT licence. Built on InvISP (Xing, Qian &amp; Chen, CVPR 2021). The included model "
-            "weights were trained on MIT-Adobe FiveK and RAISE and are for non-commercial research use; "
-            "see NOTICE.md.</p><p>Saira typeface: SIL Open Font License.</p>")
+            "<p>Licence: CC BY-NC-SA 4.0 (non-commercial use, with credit, under the same terms). The "
+            "included model weights were trained on MIT-Adobe FiveK and RAISE and are for non-commercial "
+            "research use.</p>"
+            "<p>Built on <b>InvISP</b> (Xing, Qian &amp; Chen, CVPR 2021). Training ideas from <b>Edit-aware "
+            "RAW Reconstruction</b> (Punnappurath et al., CVPR 2026), <b>RawGen</b> (Kim et al., ECCV 2026), "
+            "<b>SpiralDiff</b> (Yue et al., CVPR 2026) and <b>ParamISP</b> (Kim et al., CVPR 2024). "
+            "Full credits in NOTICE.md.</p><p>Saira typeface: SIL Open Font License.</p>")
 
     def closeEvent(self, e):
         if self.running:

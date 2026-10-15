@@ -1,4 +1,4 @@
-// Part of OpenRAW (our own code, MIT). Used by tools/build_dng_validate.sh.
+// Part of OpenRAW (our own code, CC BY-NC-SA 4.0; see LICENSE). Used by tools/build_dng_validate.sh.
 // Stub of dng_xmp_sdk for building dng_validate WITHOUT Adobe's XMP Toolkit.
 // All XMP operations are no-ops: structural DNG/TIFF validation is unaffected;
 // only XMP metadata handling is disabled (openraw writes no XMP anyway).

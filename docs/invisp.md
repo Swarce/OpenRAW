@@ -44,7 +44,7 @@ gain-matched, linear DNG.*
 
 All seven are trained on MIT-Adobe FiveK images, and `openraw-fivek-raise-*`
 also on RAISE; both datasets are licensed for research only, so the weights
-are offered for **non-commercial research use** (the code is MIT). Citations
+are offered for **non-commercial research use**, like the code (CC BY-NC-SA 4.0). Citations
 and terms: [NOTICE.md](../NOTICE.md#training-data).
 
 **Which to use:** `openraw-fivek-raise-r2-e19` (the app's recommended

@@ -85,4 +85,8 @@ behind it, and the dead ends already explored.
 
 ## License
 
-Contributions are released under the project's MIT license.
+Contributions are released under the project's license, CC BY-NC-SA 4.0
+(see [LICENSE](LICENSE)). If you bring in code from another project, keep its
+copyright notice and licence file, check that its licence is compatible
+(MIT, BSD, Apache-2.0 and CC BY-NC-SA 4.0 are), and add it to
+[NOTICE.md](NOTICE.md) with its authors, links and BibTeX.

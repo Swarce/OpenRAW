@@ -5,6 +5,15 @@ summarized; commit messages carry the full detail and measurements.
 
 ## [Unreleased]
 
+### Changed — licence
+- **OpenRAW is now licensed under CC BY-NC-SA 4.0** (Creative Commons
+  Attribution-NonCommercial-ShareAlike), replacing MIT. It matches the
+  non-commercial terms the model weights already had, and it lets OpenRAW
+  include code from research projects released under the same licence (such
+  as RawGen) with their authors credited. Versions up to and including
+  0.1.0a1 (commit 629bd63) remain available under MIT. Third-party code keeps
+  its own licence; see `NOTICE.md`.
+
 ### Added
 - **`openraw-fivek-raise-r2-e19.pth`**, the new recommended model: epoch 19
   of a second FiveK + RAISE run, trained from scratch with mixed precision.
