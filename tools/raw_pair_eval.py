@@ -216,32 +216,50 @@ def _orient(tile, orientation):
             5: lambda a: np.rot90(a, 1), 7: lambda a: np.rot90(a, 3)}.get(orientation, lambda a: a)(tile)
 
 
-def comparison_image(path, title, tiles, orientation, tile_px=360, cols=4):
-    """tiles: [(label, sublabel, float RGB in display space 0..1)] -> one JPEG grid."""
+def comparison_image(path, title, tiles, orientation, tile_px=420, cols=4, subtitle=""):
+    """tiles: [(label, sublabel, float RGB in display space 0..1)] -> one JPEG grid.
+    Text is sized to stay readable when the image is viewed scaled down to a
+    phone or a chat preview (the first version's 14-22 px text wasn't)."""
     from PIL import Image, ImageDraw, ImageFont
     font_path = ROOT / "tools" / "logo" / "fonts"
     fonts = sorted(glob.glob(str(font_path / "*.ttf")))
-    def font(sz):
+
+    def font(sz, weight="Medium"):
         try:
-            return ImageFont.truetype(fonts[0], sz) if fonts else ImageFont.load_default()
-        except OSError:
+            f = ImageFont.truetype(fonts[0], sz) if fonts else ImageFont.load_default(sz)
+        except (OSError, TypeError):
             return ImageFont.load_default()
+        try:  # Saira is a variable font: pick a weight that holds up when scaled down
+            f.set_variation_by_name(weight)
+        except Exception:  # noqa: BLE001 -- not a variable font / no such instance
+            pass
+        return f
     rows = -(-len(tiles) // cols)
-    pad, head, lab = 10, 46, 46
+    pad = 16
+    f_title, f_sub, f_label, f_value = font(40, "SemiBold"), font(26), font(30, "SemiBold"), font(28)
+    head = 16 + 48 + (38 if subtitle else 0) + 8
+    lab = 8 + 36 + 34 + 8
     W = cols * tile_px + (cols + 1) * pad
     H = head + rows * (tile_px + lab) + (rows + 1) * pad
     canvas = Image.new("RGB", (W, H), (24, 24, 27))
     d = ImageDraw.Draw(canvas)
-    d.text((pad, 12), title, fill=(235, 235, 235), font=font(22))
+    d.text((pad, 16), title, fill=(245, 245, 245), font=f_title)
+    if subtitle:
+        d.text((pad, 16 + 48), subtitle, fill=(200, 200, 206), font=f_sub)
     for i, (label, sub, img) in enumerate(tiles):
         r, c = divmod(i, cols)
         x = pad + c * (tile_px + pad); y = head + pad + r * (tile_px + lab + pad)
         t = (np.clip(_orient(img, orientation), 0, 1) * 255 + 0.5).astype(np.uint8)
         im = Image.fromarray(t).resize((tile_px, tile_px), Image.NEAREST if t.shape[0] < tile_px else Image.LANCZOS)
         canvas.paste(im, (x, y))
-        d.text((x, y + tile_px + 4), label, fill=(235, 235, 235), font=font(17))
-        d.text((x, y + tile_px + 24), sub, fill=(160, 160, 165), font=font(14))
-    canvas.save(path, quality=88, optimize=True, progressive=True)
+        fl = f_label
+        for sz in (28, 26, 24, 22):  # long model names: shrink to fit the tile, never past it
+            if d.textlength(label, font=fl) <= tile_px:
+                break
+            fl = font(sz, "SemiBold")
+        d.text((x, y + tile_px + 8), label, fill=(245, 245, 245), font=fl)
+        d.text((x, y + tile_px + 8 + 36), sub, fill=(205, 205, 212), font=f_value)
+    canvas.save(path, quality=90, optimize=True, progressive=True)
 
 
 # ---------------------------------------------------------------------- main
@@ -297,18 +315,18 @@ def main(argv=None) -> int:
             # one display scale for every raw-derived tile: the true raw's 99.5th percentile -> 0.95
             scale = 0.95 / max(float(np.percentile(_luma(r_full[sl]), 99.5)), 1e-6)
             tiles = [("Camera JPEG", "what OpenRAW starts from", _enc(j_full[sl])),
-                     ("Real raw (.ARW)", "ground truth, same rendering", _enc(r_full[sl] * scale))]
+                     (f"Real raw ({Path(raw).suffix.upper()})", "the target", _enc(r_full[sl] * scale))]
             for (m, lay), img in renders.items():
                 r_, i_ = overlap(ref, img, dy, dx)
                 g = gains(r_, i_)
                 res = results[(m, lay)]
                 tiles.append((f"{m.replace('openraw-fivek-', '')} ({'CFA' if lay == 'cfa' else 'linear'})",
-                              f"{res['psnr_gain']:.1f} dB gain-matched", _enc(i_[sl] * g * scale)))
+                              f"{res['psnr_gain']:.2f} dB gain-matched", _enc(i_[sl] * g * scale)))
             name = out / f"{stem}_compare.jpg"
             camera = Image.open(jpg).getexif().get(0x0110, "")
-            comparison_image(name, f"{stem}{' (' + camera.strip() + ')' if camera else ''}: {a.crop}x{a.crop} px crop "
-                                   f"-- every raw rendered by LibRaw the same way, matched to the real raw's exposure",
-                             tiles, orientation)
+            comparison_image(name, f"{stem}{' (' + camera.strip() + ')' if camera else ''}: {a.crop}x{a.crop} px crop",
+                             tiles, orientation,
+                             subtitle="Every raw rendered by LibRaw the same way, matched to the real raw's exposure")
             print(f"  {stem}: wrote {name}", flush=True)
         del renders, ref
 
