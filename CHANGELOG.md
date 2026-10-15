@@ -5,6 +5,22 @@ summarized; commit messages carry the full detail and measurements.
 
 ## [Unreleased]
 
+### Added — code from RawGen and SpiralDiff, credited
+- `openraw/third_party/rawgen/` (CC BY-NC-SA 4.0): RawGen's random
+  photo-finishing, ported to PyTorch, now the default for `--finish_aug`
+  (`--finish_style rawgen`; `simple` keeps the earlier finish; `--finish_wb`
+  adds RawGen's white-balance multipliers), and its set of 8,821 real scene
+  illuminants, which the edit-aware loss now draws its white-balance edits
+  from (`--edit_wb real`, default).
+- `openraw/third_party/spiraldiff/` (MIT): SpiralDiff's log-domain L1 loss,
+  as `--logl1_loss`. `--cam_lora_alpha` scales the per-camera adapters by
+  alpha/rank, as SpiralDiff's CamLoRA does.
+- Each folder keeps its authors' licence, a README of what was taken and
+  changed, and a header on every file; `NOTICE.md` and
+  `docs/references.bib` list them (plus HDR-CNN and the NUS illuminant
+  dataset, which those pieces build on). SpiralDiff's licence is recorded as
+  MIT, per its LICENSE file (its README badge says Apache-2.0).
+
 ### Changed — licence
 - **OpenRAW is now licensed under CC BY-NC-SA 4.0** (Creative Commons
   Attribution-NonCommercial-ShareAlike), replacing MIT. It matches the

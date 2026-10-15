@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Turn JPEGs into editable raw DNGs (linear or Bayer mosaic) for extra grading headroom"
 readme = "README.md"
 license = "CC-BY-NC-SA-4.0"
-license-files = ["LICENSE", "NOTICE.md", "openraw/third_party/invisp/LICENSE"]
+license-files = ["LICENSE", "NOTICE.md", "openraw/third_party/invisp/LICENSE", "openraw/third_party/rawgen/LICENSE", "openraw/third_party/spiraldiff/LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "Riley", email = "riley026465@gmail.com" }]
 keywords = ["dng", "raw", "jpeg", "photography", "linear-dng", "bayer", "demosaicing", "invisp"]
@@ -59,6 +59,8 @@ include = ["openraw*"]
 
 [tool.setuptools.package-data]
 "openraw.third_party.invisp" = ["LICENSE", "UPSTREAM_README.md"]
+"openraw.third_party.rawgen" = ["LICENSE", "README.md", "illuminants.csv"]
+"openraw.third_party.spiraldiff" = ["LICENSE", "README.md"]
 "openraw.gui" = ["*.ttf", "*.png", "OFL-Saira.txt"]
 
 [tool.pytest.ini_options]

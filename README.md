@@ -166,7 +166,8 @@ spotlight: **InvISP** (Xing, Qian & Chen, CVPR 2021, MIT) is the network at
 its core, and the optional training features follow **Edit-aware RAW
 Reconstruction** (Punnappurath et al., CVPR 2026), **RawGen** (Kim et al.,
 ECCV 2026), **SpiralDiff** (Yue et al., CVPR 2026) and **ParamISP** (Kim et
-al., CVPR 2024). Authors, links, licences and BibTeX for each are in
+al., CVPR 2024), with code and data adapted from RawGen's and SpiralDiff's
+own repositories in `openraw/third_party/`. Authors, links, licences and BibTeX for each are in
 [NOTICE.md](NOTICE.md) and [docs/references.bib](docs/references.bib).
 
 The InvISP models are trained on the **MIT-Adobe FiveK** dataset

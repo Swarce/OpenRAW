@@ -131,22 +131,30 @@ No source from Invertible-Image-Rescaling was directly vendored here —
 only InvISP's own code (which already incorporates/adapts that design)
 was pulled in.
 
-## Ideas from other papers: implemented, not vendored
+## Papers OpenRAW's training builds on (code adapted from two of them)
 
-The optional training additions in `openraw/conditioning.py`,
+The optional training additions (train.py's `--edit_loss`, `--finish_aug`,
+`--logl1_loss`, `--cam_lora`, `--exif_cond`; see
+[`docs/training.md`](docs/training.md)) come from four papers.
+
+**Code and data adapted (2026-10-15), each folder with its authors' licence,
+a README saying what was taken and what was changed, and a header on every
+file:**
+
+| Folder | From | Licence | What |
+|---|---|---|---|
+| [`openraw/third_party/rawgen/`](openraw/third_party/rawgen/) | RawGen, commit `39f959b` | CC BY-NC-SA 4.0 | RawGen's random photo-finishing (`--finish_style rawgen`, the default) and its set of 8,821 real scene illuminants (`--edit_wb real`, the default) |
+| [`openraw/third_party/spiraldiff/`](openraw/third_party/spiraldiff/) | SpiralDiff, commit `3081993` | MIT | its log-domain L1 loss (`--logl1_loss`); the CamLoRA `alpha / rank` scaling (`--cam_lora_alpha`) follows its `LoRAFFN` |
+
+**Written for OpenRAW from the papers' text:** `openraw/conditioning.py`
+(per-camera adapters, EXIF conditioning), the edit-aware loss in
 `openraw/train_losses.py`, `openraw/camera_params.py` and
-`data/camera_params.py` (train.py's `--edit_loss`, `--finish_aug`,
-`--cam_lora`, `--exif_cond`; see [`docs/training.md`](docs/training.md)) were
-written for OpenRAW from the papers' text. **No source code, weights or data
-from these projects is included so far.** Since OpenRAW moved to CC BY-NC-SA
-4.0 (2026-10-15), code under compatible licences can be brought in:
-SpiralDiff's (Apache-2.0) and RawGen's (CC BY-NC-SA 4.0, the same licence).
-ParamISP's repository has no licence at all, so its code needs the authors'
-permission whatever OpenRAW's licence is. Anything brought in will keep its
-authors' copyright notices and licence and be listed here. They are credited
-here because the ideas are theirs. If you use
-these features in research, please cite the original papers. All BibTeX
-entries are collected in [`docs/references.bib`](docs/references.bib).
+`data/camera_params.py`. The Edit-aware RAW Reconstruction paper has no code
+release. ParamISP's repository has no licence at all, so its code can't be
+used without the authors' permission, whatever OpenRAW's licence is.
+
+If you use these features in research, please cite the original papers. All
+BibTeX entries are collected in [`docs/references.bib`](docs/references.bib).
 
 **Edit-aware loss** (`--edit_loss`), from:
 
@@ -169,7 +177,8 @@ entries are collected in [`docs/references.bib`](docs/references.bib).
 CVPR 2026 listing.)
 
 **Photo-finishing augmentation** (`--finish_aug`), after RawGen's training on
-many finished variants per target, from:
+many finished variants per target, with RawGen's own finishing and
+illuminant set (code and data in `openraw/third_party/rawgen/`), from:
 
 > Dongyoung Kim, Junyong Lee, Abhijith Punnappurath, Mahmoud Afifi, Sangmin
 > Han, Alex Levinshtein, Michael S. Brown (AI Center – Toronto, Samsung
@@ -196,7 +205,9 @@ many finished variants per target, from:
 > Jingyu Yang.
 > **SpiralDiff: Spiral Diffusion with LoRA for RGB-to-RAW Conversion Across Cameras.** CVPR 2026.
 > Paper: <https://arxiv.org/abs/2603.14885> · Code: <https://github.com/Chuancy-TJU/SpiralDiff>
-> Licence: Apache-2.0.
+> Licence: MIT, per the repository's LICENSE file (its README badge says Apache-2.0).
+> Also the source of `--logl1_loss` (code in `openraw/third_party/spiraldiff/`), whose
+> `eps` follows HDR-CNN (Eilertsen et al., ACM TOG 2017).
 
 ```bibtex
 @inproceedings{yue2026spiraldiff,

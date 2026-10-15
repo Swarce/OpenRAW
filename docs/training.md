@@ -281,8 +281,11 @@ settings > CUDA - Sysmem Fallback Policy > Prefer No Sysmem Fallback.
 
 ## Optional additions from recent papers
 
-Four ideas from 2024–2026 RAW-reconstruction papers, written for OpenRAW
-from the papers' descriptions. All are **off by default**, so existing runs
+Ideas from four 2024–2026 RAW-reconstruction papers. Two come with code
+and data adapted from the authors' own repositories
+(`openraw/third_party/rawgen/`, `openraw/third_party/spiraldiff/`, each with
+its licence and a README of what was taken and changed); the rest was
+written for OpenRAW from the papers' descriptions. All are **off by default**, so existing runs
 and checkpoints behave exactly as before. Credits, licences and BibTeX are in
 [`NOTICE.md`](../NOTICE.md) and [`references.bib`](references.bib). None of them
 has been measured on our data yet. Treat each one as an experiment: train a
@@ -291,9 +294,10 @@ new `TASK` with it and compare against a run without it
 
 | Option | Idea from | What it does | Cost |
 |---|---|---|---|
-| `--edit_loss 1` | Edit-aware RAW Reconstruction (Punnappurath et al., CVPR 2026) | Scores the predicted raw the way people use a DNG: both it and the true raw go through the same random edit (exposure ±σ stops, white balance, saturation, contrast, gamma), and the two renders are compared | Small: per-pixel arithmetic, no extra network pass. The paper reports up to +2 dB sRGB PSNR under edits for ~15% more training time |
-| `--finish_aug 0.5` | RawGen (Kim et al., ECCV 2026) | On `--finish_prob` of the steps, the training JPEG gets a random global finish (tone, contrast, saturation) and must still invert to the same raw. Teaches the inverse to leave a camera's photo-finishing out of the raw | One more inverse pass on those steps (~+30% at the default 0.5) |
-| `--cam_lora 4` | CamLoRA in SpiralDiff (Yue et al., CVPR 2026) | One small low-rank adapter per training camera on every convolution; picked at conversion time from the JPEG's EXIF Make/Model. Other cameras use the shared network, which `--cam_dropout` (0.2) keeps good on its own | ~295k weights per camera at rank 4 (InvISP has 1.41M) |
+| `--edit_loss 1` | Edit-aware RAW Reconstruction (Punnappurath et al., CVPR 2026) | Scores the predicted raw the way people use a DNG: both it and the true raw go through the same random edit (exposure ±σ stops, white balance, saturation, contrast, gamma), and the two renders are compared. White-balance edits move between nearby real illuminants from RawGen's set (`--edit_wb real`, default) or are random (`gaussian`) | Small: per-pixel arithmetic, no extra network pass. The paper reports up to +2 dB sRGB PSNR under edits for ~15% more training time |
+| `--finish_aug 0.5` | RawGen (Kim et al., ECCV 2026) | On `--finish_prob` of the steps, the training JPEG gets a random photo finish and must still invert to the same raw. Teaches the inverse to leave a camera's photo-finishing out of the raw. `--finish_style rawgen` (default) uses RawGen's own finishing: tone mapping (1+β)E^γ/(β+E^γ), contrast, and with `--finish_wb` its white-balance multipliers. `--finish_style simple` is the earlier stand-in | One more inverse pass on those steps (~+30% at the default 0.5) |
+| `--logl1_loss 0.1` | SpiralDiff (Yue et al., CVPR 2026) | Adds SpiralDiff's log-domain L1 between the predicted and true linear raw: errors in the shadows count by their relative size, like those in the highlights | Negligible |
+| `--cam_lora 4` | CamLoRA in SpiralDiff (Yue et al., CVPR 2026) | One small low-rank adapter per training camera on every convolution; picked at conversion time from the JPEG's EXIF Make/Model. Other cameras use the shared network, which `--cam_dropout` (0.2) keeps good on its own. `--cam_lora_alpha` scales the adapters by alpha/rank, as SpiralDiff does | ~295k weights per camera at rank 4 (InvISP has 1.41M) |
 | `--exif_cond` | ParamNet in ParamISP (Kim et al., CVPR 2024) | Conditions the network on the photo's exposure time, f-number, ISO and focal length (FiLM on the dense sub-networks); each setting is hidden at random in training (`--param_dropout` 0.2) so missing EXIF still works | ~410k weights; needs the settings for the training pairs (below) |
 
 **How they fit InvISP.** The edit-aware loss and the finishing augmentation
@@ -304,16 +308,23 @@ invertible (tested), and both start as "no change": adding them to a trained
 model reproduces its outputs until they've been trained.
 
 **Where we differ from the papers.**
-- *Edit-aware loss:* the paper samples real AsShotNeutral white balances,
-  applies a camera-to-XYZ matrix, and models colour and tone with small MLPs
-  fitted to LUTs and Adobe's tone curve. Our training raws are already
-  white-balanced camera RGB with no matrix stored, so each stage is a simple
-  parametric stand-in (`openraw/train_losses.py`). We use L1 rather than the
+- *Edit-aware loss:* the paper samples real AsShotNeutral white balances
+  near the image's own, applies a camera-to-XYZ matrix, and models colour and
+  tone with small MLPs fitted to LUTs and Adobe's tone curve. Our training
+  raws are already white-balanced camera RGB with no matrix stored. White
+  balance moves between nearby real illuminants (RawGen's set, in linear sRGB
+  terms), and colour and tone are simple parametric stand-ins
+  (`openraw/train_losses.py`). We use L1 rather than the
   paper's L2, to match the other losses.
-- *Finishing augmentation:* RawGen is a diffusion model that can map many
-  finishes to one target. InvISP is a bijection, so it can only move toward
-  the average over finishes. Exposure and white balance are left out, because
-  they change what the raw should be. Measure this one before relying on it.
+- *Finishing augmentation:* RawGen renders each variant from the DNG with
+  its own mini ISP. Our training pairs no longer have the DNG's colour
+  metadata, so RawGen's finishing is applied to the already rendered JPEG.
+  RawGen is a diffusion model that can map many finishes to one target;
+  InvISP is a bijection, so it can only move toward the average over
+  finishes. Exposure is never varied and white balance only with
+  `--finish_wb`, because both change what the raw should be. Runs before
+  2026-10-15 (`openraw-ft19-finish-edit` included) used the simple finish.
+  Measure this one before relying on it.
 - *EXIF conditioning:* ParamISP also feeds the raw's white balance and colour
   matrix to ParamNet. A JPEG doesn't carry those, so we use only the four
   settings a JPEG has.

@@ -1,6 +1,7 @@
 % Works OpenRAW builds on. InvISP's source code is vendored
-% (openraw/third_party/invisp/, MIT); the other entries are ideas implemented
-% for OpenRAW from the papers (no code included). See NOTICE.md for
+% (openraw/third_party/invisp/, MIT); code and data from RawGen and SpiralDiff
+% are adapted in openraw/third_party/rawgen/ and openraw/third_party/spiraldiff/;
+% the other entries are ideas implemented for OpenRAW from the papers. See NOTICE.md for
 % details and licences, and docs/training.md for the features.
 % If you use these features in research, please cite the original papers.
 
@@ -45,4 +46,24 @@
   booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
   pages     = {26067--26076},
   year      = {2024}
+}
+
+% eps of SpiralDiff's log-L1 loss (train.py --logl1_loss) follows HDR-CNN
+@article{eilertsen2017hdrcnn,
+  title   = {{HDR} image reconstruction from a single exposure using deep {CNNs}},
+  author  = {Eilertsen, Gabriel and Kronander, Joel and Denes, Gyorgy and Mantiuk, Rafa{\l} K. and Unger, Jonas},
+  journal = {ACM Transactions on Graphics (Proc. SIGGRAPH Asia)},
+  volume  = {36},
+  number  = {6},
+  year    = {2017}
+}
+
+% part of the illuminant set from RawGen (openraw/third_party/rawgen/illuminants.csv)
+@article{cheng2014illuminant,
+  title   = {Illuminant estimation for color constancy: why spatial-domain methods work and the role of the color distribution},
+  author  = {Cheng, Dongliang and Prasad, Dilip K. and Brown, Michael S.},
+  journal = {Journal of the Optical Society of America A},
+  volume  = {31},
+  number  = {5},
+  year    = {2014}
 }

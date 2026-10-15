@@ -281,14 +281,16 @@ def _setup(tmp_path, monkeypatch):
 
 def test_training_with_every_addition_saves_a_described_checkpoint(tmp_path, monkeypatch, capsys):
     run, ckpt, cams = _setup(tmp_path, monkeypatch)
-    st = run(edit_loss=1.0, finish_aug=0.5, cam_lora=2, exif_cond=True)
+    st = run(edit_loss=1.0, finish_aug=0.5, cam_lora=2, exif_cond=True, logl1_loss=0.1)
     log = capsys.readouterr().out
-    assert "edit_loss:" in log and "finish_loss:" in log and "per-camera adapters" in log
+    assert "edit_loss:" in log and "finish_loss:" in log and "logl1_loss:" in log and "per-camera adapters" in log
+    assert "RawGen's finishing" in log and "real-illuminant" in log  # the defaults
     assert st[C.META_KEY]["cameras"] == cams and st[C.META_KEY]["exif"]
     import train
     best = train._load(str(ckpt / "best.pth"), "cpu")
     assert best[C.META_KEY]["lora_rank"] == 2 and any(k.startswith(C.PREFIX) for k in best)
-    st = run(epochs=2, resume=True, edit_loss=1.0, finish_aug=0.5, cam_lora=2, exif_cond=True)  # exact resume
+    st = run(epochs=2, resume=True, edit_loss=1.0, finish_aug=0.5, cam_lora=2, exif_cond=True,
+             finish_style="simple", edit_wb="gaussian")  # exact resume, and the other styles
     assert st["epoch"] == 1
     with pytest.raises(SystemExit, match="different settings"):  # resuming without them is refused, clearly
         run(epochs=3, resume=True)
@@ -331,3 +333,72 @@ def test_snapshot_every(tmp_path, monkeypatch):
     run, ckpt, _ = _setup(tmp_path, monkeypatch)
     run(epochs=2, snapshot_every=1)
     assert (ckpt / "0000.pth").exists() and (ckpt / "0001.pth").exists()
+
+
+# ------------------------------------------------------------------ code adapted from RawGen and SpiralDiff
+def _rawgen_reference(srgb, beta, gamma, contrast):
+    """RawGen's _apply_real_isp_pipeline after its ISP, in NumPy, as written there
+    (colour's sRGB CCTFs are the IEC 61966-2-1 formulas used below)."""
+    lin = np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
+    e = np.clip(np.clip(lin, 0, 1), 0, 1) ** gamma
+    tm = (1 + beta) * e / np.maximum(beta + e, 1e-8)
+    out = np.clip(np.where(tm <= 0.0031308, tm * 12.92, 1.055 * np.maximum(tm, 0.0031308) ** (1 / 2.4) - 0.055), 0, 1)
+    return np.clip((out - 0.5) * contrast + 0.5, 0, 1)
+
+
+def test_rawgen_finishing_matches_rawgen_formulas():
+    from openraw.third_party.rawgen import finishing as F
+    g = torch.Generator().manual_seed(0)
+    rgb = torch.rand(3, 3, 8, 8, generator=g)
+    p = F.sample_params(3, "cpu", generator=g)
+    assert ((p["beta"] >= 0.1) & (p["beta"] <= 2)).all() and ((p["gamma"] >= 0.5) & (p["gamma"] <= 1.5)).all()
+    assert ((p["contrast"] >= 0.8) & (p["contrast"] <= 1.2)).all() and "wb" not in p
+    out = F.apply(rgb, p).numpy()
+    for i in range(3):
+        ref = _rawgen_reference(rgb[i].numpy().astype(np.float64), float(p["beta"][i]), float(p["gamma"][i]),
+                                float(p["contrast"][i]))
+        assert np.abs(out[i] - ref).max() < 1e-5
+    wb = F.sample_params(4, "cpu", white_balance=True, generator=g)["wb"]
+    assert torch.equal(wb[:, 1], torch.ones(4)) and ((wb >= 0.7) & (wb <= 1.3)).all()
+    assert TL.finish(rgb, "rawgen").shape == rgb.shape and TL.finish(rgb, "simple").shape == rgb.shape
+    with pytest.raises(ValueError):
+        TL.finish(rgb, "other")
+
+
+def test_real_illuminant_white_balance_edits():
+    ill = TL.illuminants()
+    assert ill.shape[1] == 2 and len(ill) > 8000
+    s = TL.real_wb_shifts(500, "cpu", generator=torch.Generator().manual_seed(1))
+    assert s.shape == (500, 2) and torch.isfinite(s).all()
+    wide = TL.real_wb_shifts(500, "cpu", neighbours=len(ill), generator=torch.Generator().manual_seed(1))
+    assert s.abs().mean() < wide.abs().mean()  # nearby illuminants: realistic, smaller edits
+    e = TL.sample_edits(2, "cpu", wb="real")
+    raw = torch.rand(2, 3, 8, 8)
+    assert TL.edit_aware_loss(raw, raw.clone(), True, edits=e).item() == 0.0
+
+
+def test_spiraldiff_logl1_weighs_shadows():
+    from openraw.third_party.spiraldiff.losses import logl1_loss
+    x = torch.rand(2, 3, 8, 8)
+    assert logl1_loss(x, x.clone()).item() == 0.0
+    dark, bright = torch.full((1, 1, 4, 4), 0.02), torch.full((1, 1, 4, 4), 0.8)
+    assert logl1_loss(dark + 0.01, dark) > 5 * logl1_loss(bright + 0.01, bright)  # same error, more weight in shadows
+    assert torch.isfinite(logl1_loss(x - 0.5, x))  # negative predictions don't produce NaN
+    assert TL.logl1(x, x.clone(), raw_gamma=True).item() == 0.0
+
+
+def test_cam_lora_alpha_scales_the_adapters():
+    x = torch.rand(1, 3, 16, 16)
+    a = _net(blocks=1, cameras=CAMS[:1], lora_rank=4, exif=False)
+    b = _net(blocks=1, cameras=CAMS[:1], lora_rank=4, exif=False, lora_alpha=2)  # scale 0.5
+    _shake(a); _shake(b)
+    base = _net(blocks=1)(x)
+    for n in (a, b):
+        C.set_context(n, [0])
+    da, db = (a(x) - base).abs().mean(), (b(x) - base).abs().mean()
+    assert 0.3 < float(db / da) < 0.7
+    sd, meta = C.split_meta(C.with_meta(b.state_dict(), b))
+    assert meta["lora_alpha"] == 2
+    c = _net(blocks=1, seed=9); C.attach_from_meta(c, meta); c.load_state_dict(sd)
+    C.set_context(c, [0]); C.set_context(b, [0])
+    assert torch.equal(c(x), b(x))

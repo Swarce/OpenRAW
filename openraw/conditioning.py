@@ -125,11 +125,16 @@ class _LoRA(nn.Module):
 class Conditioning(nn.Module):
     """Attached to an InvISPNet as `net.openraw_cond`; see the module docstring."""
 
-    def __init__(self, net: nn.Module, cameras=(), lora_rank: int = 0, exif: bool = False, hidden: int = 64):
+    def __init__(self, net: nn.Module, cameras=(), lora_rank: int = 0, exif: bool = False, hidden: int = 64,
+                 lora_alpha: float | None = None):
         super().__init__()
         from .third_party.invisp.model.model import DenseBlock
         self.cameras = list(cameras) if lora_rank > 0 else []
         self.lora_rank, self.exif, self.hidden = int(lora_rank), bool(exif), int(hidden)
+        # scale of the adapters' output: alpha / rank, as in SpiralDiff's CamLoRA
+        # (LoRAFFN); alpha = rank (the default) leaves it at 1
+        self.lora_alpha = float(lora_alpha) if lora_alpha else float(max(self.lora_rank, 1))
+        self.lora_scale = self.lora_alpha / max(self.lora_rank, 1)
         dense = [m for m in net.modules() if isinstance(m, DenseBlock)]
         self._convs = [[d.conv1, d.conv2, d.conv3, d.conv4, d.conv5] for d in dense]
         if self.lora_rank > 0 and not self.cameras:
@@ -153,7 +158,8 @@ class Conditioning(nn.Module):
         self.register_load_state_dict_post_hook(lambda module, keys: module.clear())
 
     def meta(self) -> dict:
-        return {"version": VERSION, "cameras": self.cameras, "lora_rank": self.lora_rank, "exif": self.exif,
+        return {"version": VERSION, "cameras": self.cameras, "lora_rank": self.lora_rank,
+                "lora_alpha": self.lora_alpha, "exif": self.exif,
                 "hidden": self.hidden, "params": list(PARAMS)}
 
     # ---- context: what the next forward/inverse passes condition on
@@ -191,11 +197,11 @@ class Conditioning(nn.Module):
                     ids = ids.expand(n)
                 present = [int(c) for c in torch.unique(ids).tolist() if c >= 0]
                 if len(present) == 1 and bool((ids == present[0]).all()):
-                    out = out + self.lora[present[0]][k](x).to(out.dtype)
+                    out = out + (self.lora[present[0]][k](x) * self.lora_scale).to(out.dtype)
                 else:
                     for c in present:
                         idx = (ids == c).nonzero(as_tuple=True)[0]
-                        out = out.index_add(0, idx, self.lora[c][k](x[idx]).to(out.dtype))
+                        out = out.index_add(0, idx, (self.lora[c][k](x[idx]) * self.lora_scale).to(out.dtype))
             if self.exif and j < 4:
                 if self._films is None:  # no context set: settings unknown
                     self.set_context(self.cam_ids)
@@ -210,13 +216,14 @@ class Conditioning(nn.Module):
         return hook
 
 
-def attach(net: nn.Module, cameras=(), lora_rank: int = 0, exif: bool = False, hidden: int = 64) -> Conditioning | None:
+def attach(net: nn.Module, cameras=(), lora_rank: int = 0, exif: bool = False, hidden: int = 64,
+           lora_alpha: float | None = None) -> Conditioning | None:
     """Add per-camera adapters and/or EXIF conditioning to an InvISPNet (in
     place). Returns the Conditioning module (also net.openraw_cond), or None
     when neither is asked for."""
     if lora_rank <= 0 and not exif:
         return None
-    cond = Conditioning(net, cameras, lora_rank, exif, hidden)
+    cond = Conditioning(net, cameras, lora_rank, exif, hidden, lora_alpha)
     net.openraw_cond = cond
     try:
         cond.to(next(p for n, p in net.named_parameters() if not n.startswith(PREFIX)).device)
@@ -231,7 +238,7 @@ def attach_from_meta(net: nn.Module, meta: dict | None) -> Conditioning | None:
     if int(meta.get("version", 1)) > VERSION:
         raise ValueError(f"checkpoint made by a newer OpenRAW (conditioning v{meta['version']})")
     return attach(net, meta.get("cameras", ()), int(meta.get("lora_rank", 0)), bool(meta.get("exif")),
-                  int(meta.get("hidden", 64)))
+                  int(meta.get("hidden", 64)), meta.get("lora_alpha"))
 
 
 def get(net: nn.Module) -> Conditioning | None:

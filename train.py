@@ -131,11 +131,25 @@ if __name__ == "__main__":
                         help="weight of the photo-finishing augmentation (after RawGen, ECCV 2026): the JPEG with a "
                              "random tone/contrast/saturation finish must still invert to the same raw. 0 = off; "
                              "try 0.5")
+    parser.add_argument("--finish_style", choices=["rawgen", "simple"], default="rawgen",
+                        help="which random finish --finish_aug applies: RawGen's own photo-finishing (tone mapping, "
+                             "contrast; openraw/third_party/rawgen) or OpenRAW's earlier simple stand-in")
+    parser.add_argument("--finish_wb", action="store_true",
+                        help="with --finish_style rawgen: also apply RawGen's random white-balance multipliers")
+    parser.add_argument("--edit_wb", choices=["real", "gaussian"], default="real",
+                        help="white-balance edits in the edit-aware loss: between nearby real illuminants (RawGen's "
+                             "illumination set) or random log-gains")
+    parser.add_argument("--logl1_loss", type=float, default=0.0,
+                        help="weight of a log-domain L1 loss on the raw (from SpiralDiff, CVPR 2026): weighs errors "
+                             "in the shadows like those in the highlights. 0 = off; try 0.1")
     parser.add_argument("--finish_prob", type=float, default=0.5,
                         help="share of steps that run the finishing augmentation (each costs one more inverse pass)")
     parser.add_argument("--cam_lora", type=int, default=0,
                         help="per-camera low-rank adapters of this rank (after SpiralDiff's CamLoRA, CVPR 2026); "
                              "chosen at conversion time from the JPEG's EXIF Make/Model. 0 = off; try 4")
+    parser.add_argument("--cam_lora_alpha", type=float, default=None,
+                        help="with --cam_lora: adapter output scale alpha/rank, as in SpiralDiff's CamLoRA "
+                             "(default: alpha = rank, scale 1)")
     parser.add_argument("--cam_dropout", type=float, default=0.2,
                         help="with --cam_lora: share of samples trained without their adapter, so the shared "
                              "network stays good for cameras it never saw")
@@ -244,7 +258,8 @@ def build_net(args, device):
     net = InvISPNet(channel_in=3, channel_out=3, block_num=getattr(args, "blocks", 8)).to(device)
     cams = args.camera if isinstance(args.camera, (list, tuple)) else \
         [c.strip() for c in str(args.camera or "").split(",") if c.strip()]
-    cond_mod.attach(net, cams, getattr(args, "cam_lora", 0) or 0, bool(getattr(args, "exif_cond", False)))
+    cond_mod.attach(net, cams, getattr(args, "cam_lora", 0) or 0, bool(getattr(args, "exif_cond", False)),
+                    lora_alpha=getattr(args, "cam_lora_alpha", None))
     return net
 
 
@@ -488,11 +503,17 @@ def main(args, rank=0, world=1):
         trainable = cond_mod.conditioned_parameters(net)
         print(f"[INFO] training only the added weights; InvISP's {sum(p.numel() for p in net.parameters()) - sum(p.numel() for p in trainable):,} stay fixed")
     edit_w, finish_w = float(getattr(args, "edit_loss", 0) or 0), float(getattr(args, "finish_aug", 0) or 0)
+    logl1_w = float(getattr(args, "logl1_loss", 0) or 0)
+    finish_style, edit_wb = getattr(args, "finish_style", "rawgen"), getattr(args, "edit_wb", "real")
+    if logl1_w:
+        print(f"[INFO] log-domain L1 on the raw, weight {logl1_w} (from SpiralDiff, CVPR 2026)")
     if edit_w:
-        print(f"[INFO] edit-aware loss, weight {edit_w}, exposure spread {args.edit_sigma} stops "
-              f"(Punnappurath et al., CVPR 2026)")
+        print(f"[INFO] edit-aware loss, weight {edit_w}, exposure spread {args.edit_sigma} stops, "
+              f"{'real-illuminant' if edit_wb == 'real' else 'random'} white balance (Punnappurath et al., CVPR 2026)")
     if finish_w:
-        print(f"[INFO] photo-finishing augmentation, weight {finish_w}, on {args.finish_prob:.0%} of steps (after RawGen)")
+        print(f"[INFO] photo-finishing augmentation, weight {finish_w}, on {args.finish_prob:.0%} of steps, "
+              + ("RawGen's finishing" + (" with white balance" if getattr(args, "finish_wb", False) else "")
+                 if finish_style == "rawgen" else "simple finish") + " (RawGen, ECCV 2026)")
     optimizer = torch.optim.Adam(trainable, lr=args.lr)
     # PATCHED (OpenRAW): upstream's LR drops at epochs 50 and 80 of 300 were
     # tuned for ONE camera (~650 images, ~195k steps). They now scale with
@@ -611,8 +632,8 @@ def main(args, rank=0, world=1):
         data_t0 = time.time()
         # running sums for --log_every: kept on the device and only read when a
         # line is printed, so steps between log lines don't wait on a GPU sync
-        win = torch.zeros(5, device=device); win_n = 0; win_data = win_compute = 0.0
-        ep_sum = torch.zeros(5, device=device); ep_n = 0
+        win = torch.zeros(6, device=device); win_n = 0; win_data = win_compute = 0.0
+        ep_sum = torch.zeros(6, device=device); ep_n = 0
         for i_batch, sample_batched in enumerate(dataloader):
             data_time = time.time() - data_t0  # waiting for the loader -- upstream didn't count this
             step_time = time.time()
@@ -633,12 +654,16 @@ def main(args, rank=0, world=1):
 
             loss = args.rgb_weight * rgb_loss + raw_loss
             # PATCHED (OpenRAW): optional extra objectives (openraw/train_losses.py)
-            edit_l = finish_l = torch.zeros((), device=device)
+            edit_l = finish_l = logl1_l = torch.zeros((), device=device)
             if edit_w:
-                edit_l = train_losses.edit_aware_loss(reconstruct_raw, target_raw, bool(args.gamma), args.edit_sigma)
+                edit_l = train_losses.edit_aware_loss(reconstruct_raw, target_raw, bool(args.gamma), args.edit_sigma,
+                                                      wb=edit_wb)
                 loss = loss + edit_w * edit_l
+            if logl1_w:
+                logl1_l = train_losses.logl1(reconstruct_raw, target_raw, bool(args.gamma))
+                loss = loss + logl1_w * logl1_l
             if finish_w and random.random() < args.finish_prob:
-                finished = train_losses.apply_finish(target_rgb, train_losses.sample_finish(target_rgb.shape[0], device))
+                finished = train_losses.finish(target_rgb, finish_style, bool(getattr(args, "finish_wb", False)))
                 finish_l = F.l1_loss(net(finished, rev=True), target_raw)
                 loss = loss + finish_w * finish_l
 
@@ -654,13 +679,14 @@ def main(args, rank=0, world=1):
                 ema.update()
 
             losses = torch.stack([loss.detach(), raw_loss.detach(), rgb_loss.detach(), edit_l.detach(),
-                                  finish_l.detach()])
+                                  finish_l.detach(), logl1_l.detach()])
             win += losses; ep_sum += losses; win_n += 1; ep_n += 1
             win_data += data_time; win_compute += time.time() - step_time
             last_in_epoch = i_batch == len(dataloader) - 1
             if win_n >= log_every or step == start_step or last_in_epoch:
-                l, r, g, el, fl = (win / win_n).tolist()
-                extra = (f" edit_loss: {el:.5f}" if edit_w else "") + (f" finish_loss: {fl:.5f}" if finish_w else "")
+                l, r, g, el, fl, ll = (win / win_n).tolist()
+                extra = (f" edit_loss: {el:.5f}" if edit_w else "") + (f" finish_loss: {fl:.5f}" if finish_w else "") \
+                    + (f" logl1_loss: {ll:.5f}" if logl1_w else "")
                 print("task: %s Epoch: %d Step: %d || loss: %.5f raw_loss: %.5f rgb_loss: %.5f%s || lr: %f || data %.3fs compute %.3fs%s" % (
                     args.task, epoch, step, l, r, g, extra, optimizer.param_groups[0]['lr'], win_data / win_n,
                     win_compute / win_n, f" (mean of {win_n} steps)" if win_n > 1 else ""))
