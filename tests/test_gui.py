@@ -240,3 +240,10 @@ def test_open_the_dng_or_its_folder(app, win, tmp_path, monkeypatch):
     win.queue.selectRow(0)
     win.open_selected_dng()  # no app for .dng (openUrl -> False): falls back to the folder
     assert opened == [str(dng), str(tmp_path)]
+
+
+def test_version_info_for_bug_reports(app, win):
+    info = win.version_info()
+    assert info.startswith("OpenRAW ") and "running as:" in info and "method: classical" in info
+    win.copy_version_info()
+    assert QApplication.clipboard().text() == info

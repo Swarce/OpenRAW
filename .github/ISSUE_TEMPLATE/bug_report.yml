@@ -1,47 +1,70 @@
 name: Bug report
-description: A DNG that won't open or looks wrong, a crash, or a training problem
+description: The app or command line crashed, failed, or a DNG won't open
 labels: [bug]
 body:
-  - type: textarea
-    id: what
+  - type: markdown
     attributes:
-      label: What happened
-      description: What you expected, and what you got instead.
-    validations:
-      required: true
-  - type: textarea
-    id: command
+      value: |
+        Thanks for reporting. If the problem is how a converted photo **looks** (colours, tone, artifacts), use the *Conversion looks wrong* form instead.
+  - type: dropdown
+    id: how
     attributes:
-      label: Command
-      description: The exact command you ran.
-      render: shell
+      label: How you run OpenRAW
+      options:
+        - App download (Windows)
+        - App download (macOS)
+        - App download (Linux)
+        - App from pip (openraw-gui)
+        - Command line (openraw)
+        - Training (train.py / Kaggle)
     validations:
       required: true
   - type: textarea
     id: version
     attributes:
-      label: Output of `openraw --version`
-      description: Most bugs so far depended on a library version (tifffile, imagecodecs, OpenCV, PyTorch).
+      label: Version info
+      description: |
+        In the app: *About* → *Copy version info*, then paste here. On the command line: the output of `openraw --version`.
+        Most bugs so far depended on a library version (tifffile, imagecodecs, OpenCV, PyTorch), so this matters.
       render: text
     validations:
       required: true
   - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 23H2 / macOS 15.1 / Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Settings or command
+      description: |
+        App: method (model), Run on (CPU/GPU), layout (linear/Bayer), bit depth, destination.
+        Command line: the exact command.
+      render: shell
+  - type: input
     id: reader
     attributes:
-      label: App that failed to open the DNG (if relevant)
-      description: Name and version, e.g. "Luminar Neo 1.20" or "Lightroom Classic 14". "Opens in X but not in Y" is especially useful.
+      label: Editor that failed to open the DNG (if relevant)
+      description: Name and version, e.g. "Lightroom Classic 14.0" or "darktable 5.0". "Opens in X but not in Y" is especially useful.
+  - type: input
+    id: source
+    attributes:
+      label: Camera and photo size
+      description: Make and model from the JPEG's EXIF, and its dimensions. Attach the JPEG if you can share it.
+      placeholder: Sony NEX-7, 6000 x 4000
   - type: textarea
     id: error
     attributes:
       label: Error message or log
+      description: The text from the queue's Output column, a dialog, or the terminal. For an app download that won't start, run it from a terminal and paste what it prints.
       render: text
-  - type: input
-    id: source
-    attributes:
-      label: Source JPEG
-      description: Camera model and image dimensions -- or attach the JPEG if you can share it.
-  - type: input
-    id: os
-    attributes:
-      label: OS and Python version
-      placeholder: Windows 11, Python 3.14

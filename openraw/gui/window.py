@@ -1229,9 +1229,24 @@ class MainWindow(QMainWindow):
         self.compare.set_images(_qimage(jpeg), _qimage(dng), ("Camera JPEG", f"OpenRAW DNG · {mode}"))
 
     # ============================================================== misc
+    def version_info(self) -> str:
+        """What a bug report needs: `openraw --version` plus how the app runs."""
+        import sys
+        from ..cli import _version_report
+        build = "app download" if getattr(sys, "frozen", False) else "Python install"
+        key = self.method.currentData()
+        return (_version_report() + f"\nrunning as: {build}"
+                + f"\nmethod: {key} ({self.method.currentText()})")
+
+    def copy_version_info(self) -> None:
+        QApplication.clipboard().setText(self.version_info())
+        self.statusBar().showMessage("Version info copied: paste it into the bug report.", 8000)
+
     def show_about(self) -> None:
-        QMessageBox.about(
-            self, "About OpenRAW",
+        box = QMessageBox(self)
+        box.setWindowTitle("About OpenRAW")
+        box.setTextFormat(Qt.RichText)
+        box.setText(
             f"<h3>OpenRAW {self.version}</h3>"
             "<p>Turns JPEGs into editable raw DNGs, linear or Bayer mosaic.</p>"
             f"<p><a href='{REPO_URL}'>{REPO_URL}</a></p>"
@@ -1241,7 +1256,16 @@ class MainWindow(QMainWindow):
             "<p>Built on <b>InvISP</b> (Xing, Qian &amp; Chen, CVPR 2021). Training ideas from <b>Edit-aware "
             "RAW Reconstruction</b> (Punnappurath et al., CVPR 2026), <b>RawGen</b> (Kim et al., ECCV 2026), "
             "<b>SpiralDiff</b> (Yue et al., CVPR 2026) and <b>ParamISP</b> (Kim et al., CVPR 2024). "
-            "Full credits in NOTICE.md.</p><p>Saira typeface: SIL Open Font License.</p>")
+            "Full credits in NOTICE.md.</p><p>Saira typeface: SIL Open Font License.</p>"
+            "<p>Found a problem? <i>Report a problem</i> opens the issue form; paste the details "
+            "<i>Copy version info</i> puts on the clipboard.</p>")
+        copy = box.addButton("Copy version info", QMessageBox.ActionRole)
+        report = box.addButton("Report a problem", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Close)
+        copy.clicked.connect(self.copy_version_info)
+        report.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPO_URL + "/issues/new/choose")))
+        self._about_box = box  # tests reach it here
+        box.exec()
 
     def closeEvent(self, e):
         if self.running:

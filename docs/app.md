@@ -76,6 +76,14 @@ file manager, remove it from the queue (Delete key works too, also for
 photos still waiting while others convert), or *Cancel this photo* while it
 converts: its unfinished file is removed and the rest of the queue carries on.
 
+### Reporting a problem
+
+*About* → *Report a problem* opens the issue forms on GitHub: **Bug report**
+for crashes, failures and DNGs that won't open, and **Conversion looks
+wrong** for colour, tone or detail problems. *About* → *Copy version info*
+copies what the bug form asks for (OpenRAW and library versions, OS, app
+download or Python install, the selected method).
+
 ## Themes
 
 *Theme* in the top bar: **Match system** (Light or Dark, following the

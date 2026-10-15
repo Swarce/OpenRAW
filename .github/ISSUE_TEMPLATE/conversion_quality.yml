@@ -1,0 +1,64 @@
+name: Conversion looks wrong
+description: A DNG opens, but its colours, tone or detail look wrong in an editor
+labels: [quality]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A converted DNG looking **flatter and less saturated** than the JPEG is expected: it has no tone curve until the editor adds one (see docs/app.md). This form is for results that look wrong beyond that: colour casts, banding, blotches, halos, clipped highlights, a camera that fails consistently.
+  - type: input
+    id: camera
+    attributes:
+      label: Camera (make and model)
+      description: From the JPEG's EXIF. Results depend heavily on the camera, so this is the most useful field.
+      placeholder: Canon EOS R6
+    validations:
+      required: true
+  - type: dropdown
+    id: method
+    attributes:
+      label: Method
+      options:
+        - InvISP (recommended, r2-e19)
+        - InvISP · previous (e14)
+        - InvISP · upstream Nikon
+        - Classical
+        - Custom checkpoint
+    validations:
+      required: true
+  - type: dropdown
+    id: layout
+    attributes:
+      label: Layout
+      options:
+        - Linear
+        - Bayer (CFA)
+  - type: input
+    id: editor
+    attributes:
+      label: Editor you viewed it in
+      placeholder: Lightroom Classic 14.0 / darktable 5.0 / RawTherapee 5.11
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What looks wrong
+      description: Screenshots of the JPEG and the DNG side by side help most (the app's compare view works).
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: Version info
+      description: In the app, *About* → *Copy version info*; on the command line, `openraw --version`.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: raw
+    attributes:
+      label: Extra data
+      options:
+        - label: I can share the JPEG
+        - label: I also have the camera's RAW file of the same shot (RAW+JPEG pairs let us measure the result against the real raw, which helps the most)

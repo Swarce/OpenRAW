@@ -3,6 +3,16 @@
 All notable changes. Development history before the first release is
 summarized; commit messages carry the full detail and measurements.
 
+## [Unreleased]
+
+### Added
+- Issue forms: **Bug report** (now covering the app: how it's run, version
+  info, OS, settings) and **Conversion looks wrong** (camera, method,
+  editor, screenshots, whether RAW+JPEG pairs are available); blank issues
+  point to the docs.
+- App: *About* → *Copy version info* (the bug form's version field, plus
+  how the app runs and the selected method) and *Report a problem*.
+
 ## [0.1.0a2] — 2026-10-15
 
 ### Added — code from RawGen and SpiralDiff, credited

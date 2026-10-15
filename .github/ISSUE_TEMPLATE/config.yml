@@ -1,1 +1,8 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/Swarce/OpenRAW#readme
+    about: Installing, the app, the command line, training, and what the models are.
+  - name: First launch of the app (SmartScreen / Gatekeeper)
+    url: https://github.com/Swarce/OpenRAW/blob/main/docs/app.md#first-launch
+    about: The builds aren't code-signed yet; this explains the one-time prompt.
