@@ -352,3 +352,19 @@ def test_init_from_a_snapshot_of_another_run(tmp_path):
     assert src == inp / "0019.pth" and (out / "new-task" / "checkpoint" / "latest.pth").read_bytes() == b"snap19"
     assert kr.start_from("openraw-fivek/0099.pth", out, "t2", root=tmp_path / "input") is None
     assert kr.start_from("openraw-fivek", out, "t3", root=tmp_path / "input") == inp / "best.pth"
+
+
+def test_no_data_on_a_gpu_session_stops_instead_of_preparing(tmp_path, monkeypatch):
+    """A training notebook whose datasets weren't attached must not spend GPU
+    quota downloading FiveK (it happened once: the inputs didn't attach)."""
+    monkeypatch.setattr(kr, "INPUT", tmp_path / "input"); (tmp_path / "input").mkdir()
+    called = []
+    monkeypatch.setattr(kr, "prepare", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(kr, "_gpu_count", lambda: 2)
+    with pytest.raises(SystemExit, match="attach the prepared dataset"):
+        kr.run(task="t")
+    monkeypatch.setattr(kr, "_gpu_count", lambda: 0)
+    with pytest.raises(SystemExit, match="INIT_FROM"):
+        kr.run(task="t", init_from="openraw-fivek/0019.pth")
+    assert not called
+    assert kr.run(task="t") == "prepared" and called  # CPU, nothing attached: prepare as before

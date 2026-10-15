@@ -557,6 +557,13 @@ def run(task="openraw", cameras="all", budget_gb=18.0, epochs=None, workers=3, s
         return "prepared RAISE"
     roots = find_data_roots(INPUT)
     if not roots:
+        # preparing is CPU work: on a GPU session it would burn hours of GPU quota
+        # downloading -- almost always a training run whose datasets weren't attached
+        if init_from or _gpu_count() > 0:
+            raise SystemExit("no prepared data attached, and this "
+                             + ("run has INIT_FROM set" if init_from else "is a GPU session")
+                             + ": attach the prepared dataset(s) (Add Input) to train. To prepare data "
+                             "instead, use a session with Accelerator None and INIT_FROM = None.")
         log("no prepared data attached -> PREPARE mode")
         prepare(cameras, budget_gb=budget_gb)
         log("Next: 'Save Version' finishes, then on this notebook's output page choose 'New Dataset', and "
