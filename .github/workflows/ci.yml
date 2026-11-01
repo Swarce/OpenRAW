@@ -152,7 +152,7 @@ jobs:
           /tmp/v/bin/pip install dist/*.whl
           cd /tmp && /tmp/v/bin/openraw "$GITHUB_WORKSPACE/examples/test_source.jpg" -o /tmp/out.dng
           test -s /tmp/out.dng
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
